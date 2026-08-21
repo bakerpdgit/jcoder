@@ -1,0 +1,26 @@
+{
+  "source": "https://teavm.org/playground",
+  "fetchedAt": "2026-08-21T09:09:18.315Z",
+  "files": [
+    {
+      "name": "compiler.wasm",
+      "bytes": 4126432,
+      "sha256": "a79245353ac623df4fde5740bb2bedacedc9c98544253f01aa4b63268f9cb8ba"
+    },
+    {
+      "name": "compiler.wasm-runtime.js",
+      "bytes": 11642,
+      "sha256": "75b2b94394f162c384d42d540836375cdbb0207e6e5605b92a18ce56eb158741"
+    },
+    {
+      "name": "compile-classlib-teavm.bin",
+      "bytes": 199668,
+      "sha256": "4ed72de9e6ea1b58adfaa1b75c30379d7bccde71c529f795df383d62045367d9"
+    },
+    {
+      "name": "runtime-classlib-teavm.bin",
+      "bytes": 2377497,
+      "sha256": "e62ab99ce291a3379abc0756a1e80f4796f00c60fee655e488b82e37b469d5b7"
+    }
+  ]
+}

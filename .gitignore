@@ -8,7 +8,7 @@ playwright-report/
 
 # The TeaVM runtime bundle (compiler.wasm + class libraries, ~6.7MB).
 # Not in git: run `npm run fetch:runtime` (or CI) to download it.
-public/teavm/
+# public/teavm/
 
 # Licence texts published for the About dialog by scripts/build-notices.mjs.
 public/third-party-notices.txt
