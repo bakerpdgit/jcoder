@@ -1,3 +1,9 @@
+/**
+ * What this thing is called, in prose. The header renders the same words with
+ * "Coder" picked out in the accent colour, so change both together.
+ */
+export const PRODUCT_NAME = 'A Java Coder'
+
 /** Where the TeaVM toolchain is served from, relative to the site root. */
 export const RUNTIME_BASE_PATH = '/teavm/'
 

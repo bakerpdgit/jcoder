@@ -111,6 +111,9 @@ download at your own host instead.
 * **Filesystems** — each is an independent workspace in IndexedDB. Create,
   rename, delete, import a `.zip` as a new filesystem, or download one as a
   `.zip`.
+* **About** — the ⓘ button in the top right: what this is for, what it
+  deliberately cannot do, and the licences of everything it is built from. Worth
+  pointing students at before they hit a limitation the hard way.
 * **Connect a folder** — reads a real folder from disk into a new filesystem and
   mirrors every later change back to it (Chrome/Edge only; the File System
   Access API does not exist in Firefox or Safari, where upload/download still
@@ -250,8 +253,10 @@ src/
     ConsolePanel.tsx          Console / Inputs / Problems tabs, inline input caret
     FileSystemPanel.tsx       Filesystem browser, folder connect, zip import
     dialogs/DialogProvider.tsx  Promise-based confirm/prompt/alert
+    dialogs/AboutDialog.tsx     What this is, what it cannot do, and credits
 
 scripts/fetch-runtime.mjs     Downloads public/teavm/
+scripts/build-notices.mjs     Publishes the licence texts the About dialog links to
 ```
 
 ## Testing

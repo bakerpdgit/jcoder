@@ -14,6 +14,10 @@ const MIME = {
   '.mjs': 'text/javascript; charset=utf-8',
   '.css': 'text/css; charset=utf-8',
   '.json': 'application/json; charset=utf-8',
+  // The licence notices the About dialog links to: served as text so the
+  // browser shows them in the tab rather than downloading them.
+  '.txt': 'text/plain; charset=utf-8',
+  '.md': 'text/plain; charset=utf-8',
   '.wasm': 'application/wasm',
   '.bin': 'application/octet-stream',
   '.teadbg': 'application/octet-stream',

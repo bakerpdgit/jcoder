@@ -2,12 +2,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { CodeEditor, type EditorHandle } from './components/CodeEditor'
 import { ConsolePanel } from './components/ConsolePanel'
 import { FileSystemPanel } from './components/FileSystemPanel'
+import { AboutDialog } from './components/dialogs/AboutDialog'
 import { useDialogs } from './components/dialogs/DialogProvider'
 import { IconButton } from './components/ui/IconButton'
 import { ThemeToggleButton } from './components/ui/ThemeToggleButton'
 import { useRunner } from './hooks/useRunner'
 import {
   MAX_CONSOLE_HEIGHT, MAX_SIDEBAR_WIDTH, MIN_CONSOLE_HEIGHT, MIN_SIDEBAR_WIDTH,
+  PRODUCT_NAME,
 } from './constants'
 import { parseArgs } from './utils/args'
 import { DEFAULT_LANGUAGE, getLanguage } from './utils/languages'
@@ -51,6 +53,7 @@ export function App() {
   const [booted, setBooted] = useState(false)
   /** '' means "let the compiler choose"; otherwise a pinned class name. */
   const [mainClass, setMainClass] = useState(loadMainClass)
+  const [aboutOpen, setAboutOpen] = useState(false)
 
   const [localFolderHandle, setLocalFolderHandle] = useState<FileSystemDirectoryHandle | null>(null)
   const [localFolderFsId, setLocalFolderFsId] = useState<string | null>(null)
@@ -308,7 +311,7 @@ export function App() {
     <div className="flex h-screen w-screen flex-col gap-2 bg-slate-950 p-2">
       <header className="flex shrink-0 flex-wrap items-center gap-2 rounded-xl border border-slate-700 bg-slate-900/60 px-3 py-2">
         <h1 className="mr-2 text-sm font-semibold tracking-tight text-slate-100">
-          Java <span className="text-emerald-400">Coder</span>
+          A Java <span className="text-emerald-400">Coder</span>
         </h1>
 
         <label className="flex items-center gap-1.5 text-xs text-slate-400">
@@ -376,8 +379,15 @@ export function App() {
             </svg>
           </IconButton>
           <ThemeToggleButton theme={theme} onToggle={() => setTheme(t => (t === 'dark' ? 'light' : 'dark'))} />
+          <IconButton label={`About ${PRODUCT_NAME}`} onClick={() => setAboutOpen(true)}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+              <circle cx="12" cy="12" r="9" /><path d="M12 11v5" /><path d="M12 7.5v.5" />
+            </svg>
+          </IconButton>
         </div>
       </header>
+
+      <AboutDialog open={aboutOpen} onClose={() => setAboutOpen(false)} />
 
       {banner && (
         <div className="shrink-0 rounded-lg border border-slate-600 bg-slate-800/60 px-3 py-2 text-xs text-slate-200">

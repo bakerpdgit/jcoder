@@ -1,5 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
   <rect width="64" height="64" rx="12" fill="#0f172a"/>
-  <path d="M33 14h7v20.5a9.5 9.5 0 0 1-9.6 9.5 9.6 9.6 0 0 1-9-6.2l6.1-2.6a3.5 3.5 0 0 0 3 2.1c1.9 0 2.5-1.2 2.5-3.3z" fill="#34d399"/>
-  <path d="M20 50c8 3 16 3 24 0" stroke="#7dd3fc" stroke-width="3" fill="none" stroke-linecap="round"/>
+  <!-- A bold J, drawn as a path rather than text so it does not depend on a
+       font being available. Kept chunky: a favicon is rendered at 16px. -->
+  <path d="M24 13h22v7h-7v20.5A12.5 12.5 0 0 1 26.5 53a12.5 12.5 0 0 1-12-9.1l7.4-2.6a5 5 0 0 0 4.6 3.7 5 5 0 0 0 5-5V20h-7.5z" fill="#34d399"/>
 </svg>

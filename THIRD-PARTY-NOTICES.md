@@ -32,9 +32,9 @@ Licensed under the **Apache License 2.0**.
 
 teavm-javac is the project that compiles **javac and TeaVM themselves** to
 WebAssembly, producing `compiler.wasm` and the two class-library archives.
-Everything jcoder does when you press Run — parse Java, report diagnostics,
+Everything java coder does when you press Run — parse Java, report diagnostics,
 emit bytecode, generate WebAssembly — happens inside that module. The
-`CompilerLibrary` API jcoder calls (`createCompiler`, `addSourceFile`,
+`CompilerLibrary` API java coder calls (`createCompiler`, `addSourceFile`,
 `compile`, `detectMainClasses`, `generateWebAssembly`, …) is defined there.
 
 ### OpenJDK
@@ -65,14 +65,14 @@ with them. Ship this file alongside them.
 Bundled inside `compiler.wasm` by teavm-javac, which uses it to read the
 class-library archives.
 
-## Bundled into the jcoder application
+## Bundled into the java coder application
 
 | Project | Licence | |
 |---|---|---|
 | [Monaco Editor](https://github.com/microsoft/monaco-editor) | MIT | The code editor, self-hosted rather than loaded from a CDN |
 | [@monaco-editor/react](https://github.com/suren-atoyan/monaco-react) | MIT | React bindings for Monaco |
 | [React](https://react.dev) and React DOM | MIT | The UI |
-| [JSZip](https://stuk.github.io/jszip/) | MIT **or** GPL-3.0-or-later (dual) | Importing and exporting a filesystem as `.zip`. jcoder uses it under the MIT option. |
+| [JSZip](https://stuk.github.io/jszip/) | MIT **or** GPL-3.0-or-later (dual) | Importing and exporting a filesystem as `.zip`. java coder uses it under the MIT option. |
 
 Monaco ships the [Codicon](https://github.com/microsoft/vscode-codicons) icon
 font (`codicon.ttf`), whose code is MIT licensed and whose icons are licensed

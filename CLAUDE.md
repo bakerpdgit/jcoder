@@ -113,6 +113,18 @@ retaining the object gives garbage. The registration it returns cannot be used
 to unsubscribe either — its `destroy` does not survive the crossing into
 JavaScript — which is a second reason each run gets a fresh compiler.
 
+### The licence texts under public/ are generated
+
+`public/third-party-notices.txt` and `public/monaco-third-party-notices.txt` are
+written by `scripts/build-notices.mjs` from `THIRD-PARTY-NOTICES.md` and from
+the monaco-editor package, and are gitignored. `predev` and `prebuild` run it,
+so it is not a step anyone has to remember — but it does mean the About
+dialog's licence links 404 until one of those has run at least once. Edit
+`THIRD-PARTY-NOTICES.md`, never the generated `.txt`.
+
+`server.mjs` serves `.txt` as `text/plain` on purpose: without that the browser
+downloads the notices instead of showing them.
+
 ### Monaco is self-hosted, deliberately
 
 `src/utils/monacoSetup.ts` imports `edcore.main` plus *tokenizer-only* language

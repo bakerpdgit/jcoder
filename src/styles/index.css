@@ -121,6 +121,23 @@ html[data-theme="light"] .console-inline-input { color: #047857; }
   padding: 1.25rem;
 }
 
+/* The About dialog is long-form prose: wider, and it scrolls inside itself so
+   the Close button stays put rather than sliding off the bottom. */
+.modal-card-wide {
+  width: min(44rem, 100%);
+  max-height: min(85vh, 52rem);
+  display: flex;
+  flex-direction: column;
+}
+
+.about-scroll code {
+  background: rgba(148, 163, 184, 0.16);
+  border-radius: 0.25rem;
+  padding: 0.05rem 0.3rem;
+  font-size: 0.9em;
+}
+html[data-theme="light"] .about-scroll code { background: rgba(100, 116, 139, 0.14); }
+
 .confirm-warning {
   background: rgba(251, 191, 36, 0.12);
   border: 1px solid rgba(245, 158, 11, 0.45);

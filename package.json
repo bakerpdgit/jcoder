@@ -5,11 +5,14 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "predev": "node scripts/build-notices.mjs",
     "build": "tsc -b && vite build",
+    "prebuild": "node scripts/build-notices.mjs",
     "preview": "vite preview --port 3000",
     "start": "node server.mjs",
     "test": "vitest run --pool=forks",
     "test:watch": "vitest --pool=forks",
+    "notices": "node scripts/build-notices.mjs",
     "fetch:runtime": "node scripts/fetch-runtime.mjs",
     "build:all": "npm run fetch:runtime && npm run build",
     "test:e2e": "playwright test"

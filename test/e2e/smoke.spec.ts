@@ -65,6 +65,29 @@ test('the page is cross-origin isolated, so input can block', async ({ page }) =
   expect(await page.evaluate(() => typeof SharedArrayBuffer !== 'undefined')).toBe(true)
 })
 
+test('the About dialog explains the limitations and links to the licences', async ({ page }) => {
+  await page.goto('/')
+
+  await page.getByRole('button', { name: /^About/ }).click()
+  const dialog = page.getByRole('dialog')
+  await expect(dialog).toBeVisible()
+  await expect(dialog.getByText('About A Java Coder')).toBeVisible()
+
+  // The limitations are the reason the dialog exists.
+  await expect(dialog.getByText(/built-in Scanner/)).toBeVisible()
+  await expect(dialog.getByText(/Annotations with brackets/)).toBeVisible()
+
+  // Both licence texts must actually be served, not just linked.
+  for (const path of ['/third-party-notices.txt', '/monaco-third-party-notices.txt']) {
+    const response = await page.request.get(path)
+    expect(response.status(), `${path} should be served`).toBe(200)
+    expect((await response.text()).length).toBeGreaterThan(500)
+  }
+
+  await dialog.getByRole('button', { name: 'Close' }).click()
+  await expect(dialog).toBeHidden()
+})
+
 test('a missing runtime bundle is explained rather than silently failing', async ({ page }) => {
   await page.goto('/')
   test.skip(await runtimeIsPresent(page), 'the TeaVM bundle is present, so this path cannot be exercised')
