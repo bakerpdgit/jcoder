@@ -1,0 +1,46 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Type-check and build
+        run: npm run build
+
+      # The toolchain is a ~6.7MB download from teavm.org. Cache it so the e2e
+      # job does not re-fetch it on every run, and so a teavm.org outage does
+      # not turn into a red build.
+      - name: Cache the TeaVM toolchain
+        id: teavm-cache
+        uses: actions/cache@v4
+        with:
+          path: public/teavm
+          key: teavm-playground-v1
+
+      - name: Fetch the TeaVM toolchain
+        if: steps.teavm-cache.outputs.cache-hit != 'true'
+        run: npm run fetch:runtime
+        continue-on-error: true
+
+      # Rebuild so dist/ picks up public/teavm/, then run the browser tests.
+      # The runtime-dependent specs skip themselves if the fetch above failed.
+      - run: npm run build
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:e2e

@@ -1,2 +1,7 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+
+# The TeaVM runtime bundle is binary; never normalise line endings in it.
+*.wasm binary
+*.bin binary
+*.teadbg binary

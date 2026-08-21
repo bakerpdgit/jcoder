@@ -1,0 +1,11 @@
+node_modules/
+dist/
+*.tsbuildinfo
+test-results/
+playwright-report/
+.DS_Store
+*.local
+
+# The TeaVM runtime bundle (compiler.wasm + class libraries, ~6.7MB).
+# Not in git: run `npm run fetch:runtime` (or CI) to download it.
+public/teavm/
