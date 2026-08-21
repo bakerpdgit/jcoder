@@ -13,16 +13,24 @@
 import type { CompilerDiagnostic, RunnerPhase } from '../types'
 import { STDOUT_FLUSH_THRESHOLD } from '../constants'
 import {
-  END_OF_INPUT, END_OF_LINE, REQUEST_CHAR, SUPPORT_SOURCE_PATH,
-  buildCompilationUnits, chooseMainClass, toVfsPath,
+  END_OF_INPUT, END_OF_LINE, ERROR_HELPER_PATH, REQUEST_CHAR, SUPPORT_SOURCE_PATH,
+  checkUnsupportedApis, chooseMainClass, planCompilation, toVfsPath,
+  type SourceProblem,
 } from '../utils/javaSupport'
+import { COMMAND_CHAR } from '../utils/javaFileSystem'
 import { describeError, type Toolchain } from './bootRuntime'
+import { FileBridge, type FileChange, type FileSnapshot } from './fileBridge'
 import type { TeaVMCompilerDiagnostic, TeaVMImports } from './teavmRuntime'
 
 export interface RunRequest {
   sources: Array<{ path: string; text: string }>
   args: string[]
   mainClass: string | null
+  /**
+   * The editor's text files, as they stood when Run was pressed. The program
+   * reads and writes these; see `FileBridge`.
+   */
+  files: FileSnapshot[]
 }
 
 export interface RunCallbacks {
@@ -39,6 +47,8 @@ export interface RunCallbacks {
    * prompt written with `System.out.print` is on screen before the caret is.
    */
   readLine(): string | null
+  /** Files the program created, changed or deleted, reported once it ends. */
+  onFilesChanged(changes: FileChange[], createdFolders: string[]): void
   onExit(code: number): void
   verbose: boolean
 }
@@ -81,27 +91,99 @@ export class InputBridge {
   private pending = ''
   private position = 0
 
-  constructor(private readonly readLine: () => string | null) {}
+  /** What the stderr stream is currently carrying. */
+  private stderrMode: 'output' | 'command' | 'payload' = 'output'
+  private command = ''
+  private payload = ''
+  private payloadLength = 0
+  private payloadPath = ''
+  private payloadIsBinary = false
+
+  constructor(
+    private readonly readLine: () => string | null,
+    /** Absent when the program has no filesystem, as in the UI-thread host. */
+    private readonly files?: FileBridge,
+  ) {}
 
   /**
-   * Offers a character written to stderr. Returns true when it was the request
-   * marker — which this call has now answered, having blocked for as long as
-   * the user took to type — and the caller must not print it.
+   * Offers a character written to stderr. Returns true when the character
+   * belonged to the bridge rather than to the program's output.
+   *
+   * Three things arrive on this stream: ordinary `System.err` text, the
+   * one-character request for a line of input, and filesystem commands — a
+   * command character, then a line, then for a write the text itself, whose
+   * length the command line gave so that it can contain anything.
    */
   interceptStderr(charCode: number): boolean {
-    if (charCode !== REQUEST_CHAR) return false
-    const line = this.readLine()
-    if (line === null) {
-      this.state = 'eof'
-    } else {
-      this.pending = line
-      this.position = 0
-      this.state = 'line'
+    if (this.stderrMode === 'command') {
+      if (charCode === 10) this.finishCommand()
+      else this.command += String.fromCharCode(charCode)
+      return true
     }
+    if (this.stderrMode === 'payload') {
+      this.payload += String.fromCharCode(charCode)
+      if (this.payload.length >= this.payloadLength) {
+        this.stderrMode = 'output'
+        const content = this.payload
+        this.payload = ''
+        this.stage(this.payloadIsBinary
+          ? this.files?.writeBytes(this.payloadPath, content) ?? null
+          : this.files?.write(this.payloadPath, content) ?? null)
+      }
+      return true
+    }
+    if (charCode === COMMAND_CHAR) {
+      this.stderrMode = 'command'
+      this.command = ''
+      return true
+    }
+    if (charCode !== REQUEST_CHAR) return false
+    // A line of console input: this blocks for as long as the user takes.
+    this.stage(this.readLine())
     return true
   }
 
-  /** The clock, standing in as the data channel while a line is being read. */
+  private finishCommand(): void {
+    this.stderrMode = 'output'
+    const command = this.command
+    this.command = ''
+    if (!this.files) {
+      this.stage(null)
+      return
+    }
+    // The two writes are the commands whose content follows the line that
+    // announces it — as text for `W`, as one character per byte for `Y`.
+    if (command.startsWith('W ') || command.startsWith('Y ')) {
+      this.payloadIsBinary = command.startsWith('Y ')
+      const rest = command.slice(2)
+      const space = rest.indexOf(' ')
+      this.payloadLength = Number.parseInt(rest.slice(0, space), 10)
+      this.payloadPath = rest.slice(space + 1)
+      this.payload = ''
+      if (Number.isFinite(this.payloadLength) && this.payloadLength > 0) {
+        this.stderrMode = 'payload'
+      } else {
+        this.stage(this.payloadIsBinary
+          ? this.files.writeBytes(this.payloadPath, '')
+          : this.files.write(this.payloadPath, ''))
+      }
+      return
+    }
+    this.stage(this.files.execute(command))
+  }
+
+  /** Queues a reply for the program to collect through the clock. */
+  private stage(reply: string | null): void {
+    if (reply === null) {
+      this.state = 'eof'
+      return
+    }
+    this.pending = reply
+    this.position = 0
+    this.state = 'line'
+  }
+
+  /** The clock, standing in as the data channel while a reply is being read. */
   currentTimeMillis(realClock: () => number): number {
     if (this.state === 'eof') {
       this.state = 'idle'
@@ -130,22 +212,69 @@ function mapSeverity(severity: string): CompilerDiagnostic['severity'] {
  * compilation and labelled — hiding it would turn a jcoder bug into a
  * compilation that fails for no visible reason.
  */
+/**
+ * Replaces a compiler message that cannot be acted on with one that can.
+ *
+ * Both cases here are the same underlying problem: the class library javac
+ * reads and the one TeaVM links against do not agree, so the error names an
+ * internal detail the student has never heard of.
+ */
+function explainDiagnostic(message: string): string {
+  // TeaVM declares these with a `0` suffix and renames them while compiling, so
+  // javac offers a name TeaVM will not link and TeaVM offers one javac cannot
+  // see. `getMessage` is handled by rewriting it (see javaSupport); the rest
+  // can only be explained.
+  if (/cannot find symbol/.test(message)
+      && /\b(?:getMessage|getLocalizedMessage|getCause|getClass)\b/.test(message)) {
+    return `${message}\n\n` +
+      'This method is missing from the class library used here. For an exception, ' +
+      'use e.toString() — it gives the type followed by the message — or write the ' +
+      'exception straight into a string, as in ("Error: " + e).'
+  }
+  // The @JSByRef failure a java.nio.file call produces, if one slipped past the
+  // pre-flight check in checkUnsupportedApis.
+  if (/@JSByRef/.test(message)) {
+    return 'This program uses a part of the class library that cannot run in the ' +
+      'browser — usually java.nio.file (Files, Path, Paths). Your program cannot ' +
+      'see the files in the editor; put its data in the Inputs tab instead.'
+  }
+  return message
+}
+
 function toDiagnostic(raw: TeaVMCompilerDiagnostic): CompilerDiagnostic {
-  const isInjected = raw.fileName === SUPPORT_SOURCE_PATH
+  const isInjected = raw.fileName === SUPPORT_SOURCE_PATH || raw.fileName === ERROR_HELPER_PATH
   const line = raw.lineNumber > 0 ? raw.lineNumber : 1
   const column = raw.columnNumber && raw.columnNumber > 0 ? raw.columnNumber : 1
   return {
     id: raw.type === 'teavm' ? 'teavm' : 'javac',
     severity: mapSeverity(raw.severity),
     message: isInjected
-      ? `[jcoder] internal error in the built-in Scanner: ${raw.message}`
-      : raw.message,
+      ? `[jcoder] internal error in a built-in helper (${raw.fileName}): ${raw.message}`
+      : explainDiagnostic(raw.message),
     file: isInjected || !raw.fileName ? null : toVfsPath(raw.fileName),
     line: isInjected ? 1 : line,
     column: isInjected ? 1 : column,
     endLine: isInjected ? 1 : line,
     endColumn: isInjected ? 1 : column + 1,
   }
+}
+
+/** A pre-flight finding, pointed at the student's own line. */
+function toPreflightDiagnostic(problem: SourceProblem): CompilerDiagnostic {
+  return {
+    id: 'jcoder',
+    severity: problem.severity,
+    message: problem.message,
+    file: problem.path,
+    line: problem.line,
+    column: problem.column,
+    endLine: problem.line,
+    endColumn: problem.column + 1,
+  }
+}
+
+function syntheticWarning(message: string): CompilerDiagnostic {
+  return { ...syntheticError(message), severity: 'warning' }
 }
 
 function syntheticError(message: string): CompilerDiagnostic {
@@ -186,8 +315,13 @@ export async function compileAndRun(
   // A compiler is good for one run only; see Toolchain.createSession.
   const { compiler, diagnostics: collected } = toolchain.createSession()
 
+  // Checked against the student's own text before anything is compiled, so the
+  // message lands on their line rather than arriving from inside TeaVM. The
+  // warnings ride along with every later report, since they stay true.
+  const preflight = checkUnsupportedApis(request.sources).map(toPreflightDiagnostic)
+
   const publish = (extra: CompilerDiagnostic[] = []) =>
-    callbacks.onDiagnostics([...collected.map(toDiagnostic), ...extra])
+    callbacks.onDiagnostics([...preflight, ...collected.map(toDiagnostic), ...extra])
 
   // Every way out of this function has to clear the phase as well as report the
   // exit code, or a compilation that fails leaves the status line reading
@@ -197,8 +331,24 @@ export async function compileAndRun(
     callbacks.onExit(code)
   }
 
+  if (preflight.some(problem => problem.severity === 'error')) {
+    publish()
+    finish(1)
+    return
+  }
+
   // ── javac: .java → .class ────────────────────────────────────────────
-  const units = buildCompilationUnits(request.sources)
+  const { units, fileSupportBlockedBy } = planCompilation(request.sources)
+  if (fileSupportBlockedBy.length > 0) {
+    // Their class wins, but reading files is off, and a later "cannot find
+    // symbol: Files" would be baffling on its own.
+    preflight.push(syntheticWarning(
+      `Reading and writing files is switched off for this program, because it `
+      + `declares its own ${fileSupportBlockedBy.join(', ')}. `
+      + `Rename ${fileSupportBlockedBy.length > 1 ? 'those classes' : 'that class'} `
+      + 'if you need to open a file.',
+    ))
+  }
   for (const unit of units) compiler.addSourceFile(unit.path, unit.text)
 
   callbacks.onStatus('compiling')
@@ -260,7 +410,9 @@ export async function compileAndRun(
   }
 
   // ── Run ─────────────────────────────────────────────────────────────
-  await runGenerated(toolchain.load, wasm, request.args, callbacks)
+  const files = new FileBridge(request.files)
+  await runGenerated(toolchain.load, wasm, request.args, callbacks, files)
+  callbacks.onFilesChanged(files.changedFiles(), files.createdFolders())
 }
 
 async function runGenerated(
@@ -268,6 +420,7 @@ async function runGenerated(
   wasm: Int8Array,
   args: string[],
   callbacks: RunCallbacks,
+  files: FileBridge,
 ): Promise<void> {
   const stdout = new ConsoleSink(callbacks.writeStdout)
   const stderr = new ConsoleSink(callbacks.writeStderr)
@@ -278,7 +431,7 @@ async function runGenerated(
     stdout.flush()
     stderr.flush()
     return callbacks.readLine()
-  })
+  }, files)
 
   let exitCode = 0
   try {

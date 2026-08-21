@@ -77,6 +77,71 @@ Both halves are generated from the constants in `utils/javaSupport.ts`.
 it against the real `InputBridge`, which is the only way the two languages get
 checked against each other — if you change the Java, change that transcription.
 
+### javac and TeaVM disagree about `@Rename`d methods
+
+TeaVM declares `Throwable.getMessage` as `getMessage0` with a `@Rename`
+annotation and applies the rename in its *own* compiler. The javac SDK is
+generated without applying it, so **javac sees only `getMessage0` and TeaVM
+links only `getMessage`** — neither spelling compiles and runs. The same is true
+of `getClass`, `getCause` and `getLocalizedMessage`.
+
+`getMessage()` is common enough in teaching to be worth fixing, so
+`buildCompilationUnits` rewrites the simple `identifier.getMessage()` form onto
+`JCoderErr.messageOf`, which recovers the message by splitting `toString()` on
+the first `": "`. The rewrite is switched off entirely if any source declares a
+`getMessage` of its own, because a student's override does work and must keep
+winning. Complex receivers are left alone and `explainDiagnostic` explains them.
+
+### Files are emulated, because none of the real APIs work
+
+`java.nio.file` compiles and then makes TeaVM report "@JSByRef … not supported";
+`FileReader`/`FileWriter` fail on a missing `java.io.FileDescriptor`; and
+`java.io.File` compiles, runs, and silently finds nothing, because the API that
+mounts a TeaVM virtual filesystem is not exposed to javac.
+
+So `utils/javaFileSystem.ts` injects unnamed-package `File`, `Files`, `Path`,
+`Paths`, `FileReader`, `FileWriter`, `PrintWriter`, `FileInputStream` and
+`FileOutputStream` that shadow the `java.*` ones, exactly as the `Scanner`
+does, and `SHADOWED_IMPORTS` neutralises the single-type imports that would
+outrank them. They talk to `FileBridge`, which holds a snapshot of the editor's
+files for the run; `onFilesChanged` writes back what changed once it ends.
+
+`FileBridge` stores **bytes**, not text: the channel carries any UTF-16 code
+unit unaltered (measured — a byte in 0…255 arrives as itself, one call per
+character), so binary files ride the same wire as text with one character per
+byte. Text reads and writes encode and decode UTF-8 at the edge. Do not
+"simplify" the bridge back to strings; binary exercises depend on this.
+
+The transport is not a bottleneck — about 14 million characters a second each
+way — so `MAX_MOUNTED_FILE_BYTES` exists for memory, not speed. Oversized files
+are skipped rather than truncated, because truncated data reads as corruption.
+
+Injecting them unconditionally costs ~100ms of javac and nothing in the output,
+because TeaVM drops unused classes — measured, not assumed. Do not add
+cleverness to skip it.
+
+`planCompilation` switches file support off entirely if a student declares a
+class of the same name (a maze exercise with its own `Path` is not far-fetched)
+and reports which name did it, because a duplicate-class error against a file
+they cannot open would be baffling. `Scanner(File)` is therefore conditional
+too — hence `scannerSource(withFileSupport)`.
+
+Only `RandomAccessFile` is left unsupported, and `checkUnsupportedApis` reports
+it before compiling. That scan reads `blankLiteralsAndComments` output so a
+mention inside a string cannot fail a build, and reports once per rule per file.
+
+Do not warn about `new Scanner(System.in)` — it is the spelling the whole app is
+built around, including the starter template, and a badge on every run would
+teach students to ignore the Problems tab.
+
+### The injected Java is a TypeScript template literal
+
+So `'\n'` written with one backslash becomes a *real newline* inside a Java
+character literal, and javac reports "illegal line end in character literal"
+against a file the student cannot see. Write `'\\n'`. This has bitten twice;
+`javaSupport.test.ts` now checks every injected source for a literal that runs
+off the end of its line, which is cheaper than finding out from the browser.
+
 ### Cross-origin isolation is load-bearing
 
 Reading input blocks the worker via `Atomics.wait`, which needs

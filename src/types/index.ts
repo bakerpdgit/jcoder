@@ -93,6 +93,11 @@ export type RunnerRequest =
   | {
       type: 'run'
       sources: Array<{ path: string; text: string }>
+      /**
+       * The editor's files, as they stood when Run was pressed. The program
+       * reads and writes these rather than a real disk.
+       */
+      files: Array<{ path: string; bytes: Uint8Array }>
       /** Passed to `main(String[] args)`. */
       args: string[]
       /**
@@ -113,6 +118,15 @@ export type RunnerEvent =
   | { type: 'input-request'; prompt: string }
   /** Entry points javac found, so the UI can offer a picker. */
   | { type: 'main-classes'; classes: string[]; selected: string | null }
+  /**
+   * What the program did to the filesystem, sent once it has finished so the
+   * editor can catch up. `text: null` means the program deleted the file.
+   */
+  | {
+      type: 'files-changed'
+      changes: Array<{ path: string; bytes: Uint8Array | null }>
+      createdFolders: string[]
+    }
   | { type: 'exit'; code: number }
   | { type: 'fatal'; message: string }
 

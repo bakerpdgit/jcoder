@@ -126,6 +126,11 @@ async function handleRun(request: Extract<RunnerRequest, { type: 'run' }>): Prom
       onStatus: (phase, detail) => post({ type: 'status', phase, detail }),
       onDiagnostics: (diagnostics) => post({ type: 'diagnostics', diagnostics }),
       onMainClasses: (classes, selected) => post({ type: 'main-classes', classes, selected }),
+      onFilesChanged: (changes, createdFolders) => {
+        if (changes.length > 0 || createdFolders.length > 0) {
+          post({ type: 'files-changed', changes, createdFolders })
+        }
+      },
       writeStdout: (text) => post({ type: 'stdout', text }),
       writeStderr: (text) => post({ type: 'stderr', text }),
       readLine: readLineBlocking,

@@ -6,7 +6,7 @@ import { AboutDialog } from './components/dialogs/AboutDialog'
 import { useDialogs } from './components/dialogs/DialogProvider'
 import { IconButton } from './components/ui/IconButton'
 import { ThemeToggleButton } from './components/ui/ThemeToggleButton'
-import { useRunner } from './hooks/useRunner'
+import { useRunner, type FilesChangedHandler } from './hooks/useRunner'
 import {
   MAX_CONSOLE_HEIGHT, MAX_SIDEBAR_WIDTH, MIN_CONSOLE_HEIGHT, MIN_SIDEBAR_WIDTH,
   PRODUCT_NAME,
@@ -14,8 +14,9 @@ import {
 import { parseArgs } from './utils/args'
 import { DEFAULT_LANGUAGE, getLanguage } from './utils/languages'
 import {
-  DEFAULT_FS_ID, createFilesystem, ensureDefaultFilesystem, ensureLanguageEntryPoint,
-  getAllEntries, getEntryByPath, getSourceFiles, guessMimeType, importFileMapToFs,
+  DEFAULT_FS_ID, createFilesystem, deleteEntry, ensureDefaultFilesystem,
+  ensureFolders, ensureLanguageEntryPoint, getAllEntries, getEntryByPath,
+  getMountableFiles, getParentPath, getSourceFiles, guessMimeType, importFileMapToFs,
   listFilesystems, writeFile,
 } from './utils/virtualFS'
 import {
@@ -37,7 +38,14 @@ const language = DEFAULT_LANGUAGE
 
 export function App() {
   const dialogs = useDialogs()
-  const runner = useRunner()
+  // Declared before useRunner so the handler can be handed to it, and defined
+  // after the filesystem helpers it needs; a ref inside useRunner keeps it
+  // current without re-subscribing the worker.
+  const filesChangedRef = useRef<FilesChangedHandler | null>(null)
+  const runner = useRunner({
+    onFilesChanged: (changes, createdFolders) =>
+      filesChangedRef.current?.(changes, createdFolders),
+  })
 
   const [theme, setTheme] = useState<Theme>(loadTheme)
   const [activeFilesystemId, setActiveFilesystemId] = useState<string>(() => loadActiveFilesystem() ?? DEFAULT_FS_ID)
@@ -237,9 +245,63 @@ export function App() {
       showBanner('There are no .java files in this filesystem to run.')
       return
     }
+    // The program gets a snapshot of the files, so it can open them; what it
+    // changes comes back through onFilesChanged when the run ends.
+    const { files, skipped } = await getMountableFiles(activeFilesystemId)
+    if (skipped.length > 0) {
+      showBanner(
+        `Too large to give to the program, so left out: ${skipped.join(', ')}.`,
+      )
+    }
     runner.clearOutput()
-    runner.run(sources, parseArgs(runArgs), toInputLines(fixedInput), mainClass || null)
+    runner.run(sources, parseArgs(runArgs), toInputLines(fixedInput), mainClass || null, files)
   }, [activeFilesystemId, fixedInput, flushSave, mainClass, runArgs, runner, showBanner])
+
+  /**
+   * Writes back whatever the program did to the filesystem.
+   *
+   * Applied after the run rather than during it, so a program that writes a
+   * file cannot interleave with the editor saving one.
+   */
+  const applyFileChanges = useCallback<FilesChangedHandler>((changes, createdFolders) => {
+    void (async () => {
+      try {
+        for (const folder of createdFolders) {
+          await ensureFolders(activeFilesystemId, folder)
+          if (isLocalFolderConnected) await syncToLocalFolder({ kind: 'mkdir', path: folder })
+        }
+        for (const change of changes) {
+          if (change.bytes === null) {
+            await deleteEntry(activeFilesystemId, change.path)
+            if (isLocalFolderConnected) await syncToLocalFolder({ kind: 'delete', path: change.path })
+            continue
+          }
+          // Copied, because the bytes arrived from the worker in a buffer that
+          // may be a view onto a larger one.
+          const content = change.bytes.slice().buffer as ArrayBuffer
+          await ensureFolders(activeFilesystemId, getParentPath(change.path))
+          await writeFile(activeFilesystemId, change.path, content, guessMimeType(change.path))
+          if (isLocalFolderConnected) await syncToLocalFolder({ kind: 'write', path: change.path, content })
+        }
+        setReloadTrigger(t => t + 1)
+        // A file the program rewrote may be the one on screen.
+        const open = openFilePathRef.current
+        if (open && changes.some(change => change.path === open && change.bytes !== null)) {
+          await openPath(activeFilesystemId, open)
+        }
+        const written = changes.filter(change => change.bytes !== null).length
+        const removed = changes.length - written
+        if (written > 0 || removed > 0) {
+          showBanner(
+            `The program updated the file list: ${written} written${removed > 0 ? `, ${removed} deleted` : ''}.`,
+          )
+        }
+      } catch (error) {
+        showBanner(`The program's file changes could not be saved: ${String(error)}`)
+      }
+    })()
+  }, [activeFilesystemId, isLocalFolderConnected, openPath, showBanner, syncToLocalFolder])
+  filesChangedRef.current = applyFileChanges
 
   const selectDiagnostic = useCallback(async (diagnostic: CompilerDiagnostic) => {
     if (!diagnostic.file) return

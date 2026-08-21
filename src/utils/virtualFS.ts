@@ -1,4 +1,5 @@
 import type { LanguageId, VFSEntry, VFSFile, VFSFilesystem } from '../types'
+import { MAX_MOUNTED_FILE_BYTES, MAX_MOUNTED_TOTAL_BYTES } from '../constants'
 import { LANGUAGES, compileExtensions } from './languages'
 
 const DB_NAME = 'jcoder-vfs'
@@ -284,6 +285,42 @@ export async function getSourceFiles(fsId: string, language: LanguageId): Promis
     .filter(e => e.type === 'file' && e.content !== undefined && exts.some(ext => e.name.toLowerCase().endsWith(ext)))
     .sort((a, b) => a.path.localeCompare(b.path))
     .map(e => ({ path: e.path, text: decoder.decode(e.content!) }))
+}
+
+export interface MountableFiles {
+  files: Array<{ path: string; bytes: Uint8Array }>
+  /** Paths left out for being too large, so the caller can say so. */
+  skipped: string[]
+}
+
+/**
+ * Every file in `fsId`, as bytes, for handing to a running program.
+ *
+ * Text and binary alike: the channel into the program carries a byte per
+ * character unchanged, so a program can read a `.txt` with a Scanner and a
+ * `.dat` with a FileInputStream from the same snapshot.
+ *
+ * Anything over the size limits is left out rather than truncated — a truncated
+ * file would read as corrupt data, which is far worse than one that is honestly
+ * missing and named as such.
+ */
+export async function getMountableFiles(fsId: string): Promise<MountableFiles> {
+  const entries = await getAllEntries(fsId)
+  const files: Array<{ path: string; bytes: Uint8Array }> = []
+  const skipped: string[] = []
+  let total = 0
+
+  for (const entry of entries.sort((a, b) => a.path.localeCompare(b.path))) {
+    if (entry.type !== 'file' || entry.content === undefined) continue
+    const size = entry.content.byteLength
+    if (size > MAX_MOUNTED_FILE_BYTES || total + size > MAX_MOUNTED_TOTAL_BYTES) {
+      skipped.push(entry.path)
+      continue
+    }
+    total += size
+    files.push({ path: entry.path, bytes: new Uint8Array(entry.content) })
+  }
+  return { files, skipped }
 }
 
 // ── MIME helpers ───────────────────────────────────────────────────────────

@@ -134,6 +134,93 @@ test('answers input from the Inputs tab without prompting, and runs twice', asyn
   await expect(page.getByText('Hello, Alan!')).toBeVisible({ timeout: 120_000 })
 })
 
+test('reads and writes the files in the editor', async ({ page }) => {
+  await page.goto('/')
+  test.skip(!(await runtimeIsPresent(page)), 'needs public/teavm — run `npm run fetch:runtime`')
+
+  await waitForReady(page)
+
+  // A data file for the program to open.
+  await page.getByLabel('New file').click()
+  await page.getByRole('dialog').getByRole('textbox').fill('notes.txt')
+  await page.getByRole('dialog').getByRole('button', { name: 'OK' }).click()
+  // Creating a file lists it; opening it is a separate click.
+  await page.getByRole('button', { name: 'notes.txt' }).click()
+  await expect(page.getByText('/notes.txt').first()).toBeVisible({ timeout: 20_000 })
+  await page.locator('.view-lines').click()
+  await page.keyboard.type('one\ntwo')
+
+  // Back to the program, which reads that file and writes another.
+  await page.getByRole('button', { name: 'Main.java' }).click()
+  await page.locator('.view-lines').click()
+  await page.keyboard.press('ControlOrMeta+A')
+  await page.keyboard.type(
+    'import java.io.*; import java.nio.file.*; import java.util.*; '
+    + 'public class Main { public static void main(String[] a) throws Exception { '
+    + 'List<String> lines = Files.readAllLines(Paths.get("notes.txt")); '
+    + 'PrintWriter out = new PrintWriter("out/loud.txt"); '
+    + 'for (String s : lines) { System.out.println("read " + s); out.println(s.toUpperCase()); } '
+    + 'out.close(); '
+    + 'System.out.println("check " + Files.readString(Paths.get("out/loud.txt")).trim()); } }')
+
+  await page.getByTitle(/^Run/).click()
+
+  await expect(page.getByText('read one')).toBeVisible({ timeout: 120_000 })
+  await expect(page.getByText(/check ONE/)).toBeVisible()
+  await expect(page.getByText('exited with code 0')).toBeVisible()
+
+  // The folder the program created shows up in the sidebar.
+  await expect(page.getByRole('button', { name: /out/ }).first()).toBeVisible({ timeout: 20_000 })
+})
+
+test('reads and writes binary files byte for byte', async ({ page }) => {
+  await page.goto('/')
+  test.skip(!(await runtimeIsPresent(page)), 'needs public/teavm — run `npm run fetch:runtime`')
+
+  await waitForReady(page)
+  await page.locator('.view-lines').click()
+  await page.keyboard.press('ControlOrMeta+A')
+  // Writes every byte value, reads them back, and checks the round trip —
+  // including through TeaVM's own DataOutputStream, which wraps ours.
+  await page.keyboard.type(
+    'import java.io.*; public class Main { public static void main(String[] a) throws Exception { '
+    + 'FileOutputStream out = new FileOutputStream("bytes.bin"); '
+    + 'for (int i = 0; i < 256; i++) out.write(i); out.close(); '
+    + 'FileInputStream in = new FileInputStream("bytes.bin"); '
+    + 'int bad = -1; for (int i = 0; i < 256; i++) { if (in.read() != i) { bad = i; break; } } in.close(); '
+    + 'System.out.println("roundtrip " + (bad < 0 ? "exact" : "broken at " + bad)); '
+    + 'System.out.println("size " + new File("bytes.bin").length()); '
+    + 'DataOutputStream d = new DataOutputStream(new FileOutputStream("n.bin")); '
+    + 'd.writeInt(123456789); d.close(); '
+    + 'DataInputStream r = new DataInputStream(new FileInputStream("n.bin")); '
+    + 'System.out.println("int " + r.readInt()); r.close(); } }')
+
+  await page.getByTitle(/^Run/).click()
+
+  await expect(page.getByText('roundtrip exact')).toBeVisible({ timeout: 120_000 })
+  await expect(page.getByText('size 256')).toBeVisible()
+  await expect(page.getByText('int 123456789')).toBeVisible()
+  await expect(page.getByText('exited with code 0')).toBeVisible()
+})
+
+test('e.getMessage() works, despite the class library not offering it', async ({ page }) => {
+  await page.goto('/')
+  test.skip(!(await runtimeIsPresent(page)), 'needs public/teavm — run `npm run fetch:runtime`')
+
+  await waitForReady(page)
+  await page.locator('.view-lines').click()
+  await page.keyboard.press('ControlOrMeta+A')
+  await page.keyboard.type(
+    'public class Main { public static void main(String[] a) { '
+    + 'try { throw new java.io.IOException("bad file"); } '
+    + 'catch (java.io.IOException e) { System.out.println("caught: " + e.getMessage()); } } }')
+
+  await page.getByTitle(/^Run/).click()
+
+  await expect(page.getByText('caught: bad file')).toBeVisible({ timeout: 120_000 })
+  await expect(page.getByText('exited with code 0')).toBeVisible()
+})
+
 test('reports compiler errors in the Problems tab', async ({ page }) => {
   await page.goto('/')
   test.skip(!(await runtimeIsPresent(page)), 'needs public/teavm — run `npm run fetch:runtime`')

@@ -2,6 +2,8 @@ import { describe, expect, it, vi } from 'vitest'
 import { ConsoleSink, InputBridge } from './javaPipeline'
 import { END_OF_INPUT, END_OF_LINE, MAX_LINE_CHARS, REQUEST_CHAR } from '../utils/javaSupport'
 import { STDOUT_FLUSH_THRESHOLD } from '../constants'
+import { COMMAND_CHAR } from '../utils/javaFileSystem'
+import { FileBridge } from './fileBridge'
 
 /**
  * The Java half of the input bridge, transcribed from the `hostReadLine` method
@@ -82,6 +84,90 @@ describe('InputBridge', () => {
     const bridge = new InputBridge(() => null)
     expect(javaReadLine(bridge, realClock)).toBeNull()
     expect(javaReadLine(bridge, realClock)).toBeNull()
+  })
+})
+
+/**
+ * The Java half of the filesystem bridge, transcribed from `JCoderFs` in
+ * `utils/javaFileSystem`. As with `javaReadLine` above, keeping it a literal
+ * translation is what makes these tests evidence that the two agree.
+ */
+function javaSend(bridge: InputBridge, clock: () => number, command: string, text?: string): string | null {
+  bridge.interceptStderr(COMMAND_CHAR)
+  for (const character of command) bridge.interceptStderr(character.charCodeAt(0))
+  bridge.interceptStderr(10)
+  if (text !== undefined) {
+    for (const character of text) bridge.interceptStderr(character.charCodeAt(0))
+  }
+  let reply = ''
+  while (reply.length < MAX_LINE_CHARS) {
+    const c = bridge.currentTimeMillis(clock)
+    if (c === END_OF_LINE) return reply
+    if (c === END_OF_INPUT) return null
+    if (c < 0 || c > 65535) return null
+    reply += String.fromCharCode(c)
+  }
+  return reply
+}
+
+describe('the filesystem bridge', () => {
+  const bridgeOver = (files: Array<{ path: string; text: string }>) => {
+    const store = new FileBridge(
+      files.map(f => ({ path: f.path, bytes: new TextEncoder().encode(f.text) })))
+    return { bridge: new InputBridge(() => null, store), store }
+  }
+
+  it('reads a file the program asks for', () => {
+    const { bridge } = bridgeOver([{ path: '/demo.txt', text: 'alpha\nbeta\n' }])
+    expect(javaSend(bridge, realClock, 'R /demo.txt')).toBe('alpha\nbeta\n')
+  })
+
+  it('reports a missing file as absent', () => {
+    const { bridge } = bridgeOver([])
+    expect(javaSend(bridge, realClock, 'R /nope.txt')).toBeNull()
+  })
+
+  it('writes text that follows the command line', () => {
+    const { bridge, store } = bridgeOver([])
+    const text = 'first\nsecond\n'
+    expect(javaSend(bridge, realClock, `W ${text.length} /out.txt`, text)).toBe('ok')
+    expect(store.read('/out.txt')).toBe(text)
+  })
+
+  it('writes text containing anything at all, thanks to the length prefix', () => {
+    const { bridge, store } = bridgeOver([])
+    // Newlines and the protocol's own control characters must survive.
+    const text = `a\nbcd\n`
+    expect(javaSend(bridge, realClock, `W ${text.length} /odd.txt`, text)).toBe('ok')
+    expect(store.read('/odd.txt')).toBe(text)
+  })
+
+  it('writes an empty file without waiting for text', () => {
+    const { bridge, store } = bridgeOver([])
+    expect(javaSend(bridge, realClock, 'W 0 /empty.txt')).toBe('ok')
+    expect(store.read('/empty.txt')).toBe('')
+  })
+
+  it('interleaves console input and file access', () => {
+    const store = new FileBridge([
+      { path: '/demo.txt', bytes: new TextEncoder().encode('from file') }])
+    const lines = ['typed']
+    const bridge = new InputBridge(() => lines.shift() ?? null, store)
+    expect(javaReadLine(bridge, realClock)).toBe('typed')
+    expect(javaSend(bridge, realClock, 'R /demo.txt')).toBe('from file')
+    expect(javaReadLine(bridge, realClock)).toBeNull()
+  })
+
+  it('leaves ordinary stderr text alone', () => {
+    const { bridge } = bridgeOver([])
+    expect(bridge.interceptStderr('x'.charCodeAt(0))).toBe(false)
+    expect(bridge.interceptStderr(10)).toBe(false)
+  })
+
+  it('answers absent for every command when there is no filesystem', () => {
+    // The UI-thread host runs without one.
+    const bridge = new InputBridge(() => null)
+    expect(javaSend(bridge, realClock, 'R /demo.txt')).toBeNull()
   })
 })
 

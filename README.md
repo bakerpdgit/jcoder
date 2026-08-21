@@ -156,6 +156,76 @@ Two consequences worth knowing:
 `System.in`, `BufferedReader(new InputStreamReader(System.in))` and
 `System.console()` do **not** work. Use `Scanner`.
 
+## Reading and writing files
+
+A program can open the files in the sidebar, folders included:
+
+```java
+import java.io.*;
+import java.nio.file.*;
+import java.util.*;
+
+public class Main {
+    public static void main(String[] args) throws Exception {
+        List<String> lines = Files.readAllLines(Paths.get("demo.txt"));
+
+        PrintWriter out = new PrintWriter("results/upper.txt");
+        for (String line : lines) out.println(line.toUpperCase());
+        out.close();
+    }
+}
+```
+
+Binary files work too, which is what makes byte-level exercises possible:
+
+```java
+DataOutputStream out = new DataOutputStream(new FileOutputStream("scores.bin"));
+out.writeInt(4242);
+out.close();
+```
+
+**Text:** `File`, `Scanner(File)`, `FileReader` (with `BufferedReader`),
+`FileWriter`, `PrintWriter`, and `Files.readAllLines`/`readString`/`write`/
+`writeString`/`exists`/`createDirectories`/`delete`.
+
+**Bytes:** `FileInputStream`, `FileOutputStream`, `Files.readAllBytes` and
+`Files.write(path, byte[])`. TeaVM's own `DataInputStream`,
+`DataOutputStream`, `BufferedInputStream` and `BufferedOutputStream` wrap
+these, so `writeInt`/`readInt` and the rest work as they should.
+
+Missing files throw `FileNotFoundException`, writing to `a/b/c.txt` creates the
+folders, and whatever the program wrote appears in the sidebar when it
+finishes — including in a connected folder on disk. `RandomAccessFile` is the
+one file API with no stand-in.
+
+### How, and what it costs
+
+None of the real file APIs can work here. TeaVM *has* a virtual filesystem and
+`java.io.File` already delegates to it, but the API that mounts one is not
+exposed to javac; `java.nio.file` fails inside TeaVM's code generator; and
+`FileReader` fails on a missing `java.io.FileDescriptor`. So jcoder supplies its
+own `File`, `Files`, `Path`, `Paths`, `FileReader`, `FileWriter` and
+`PrintWriter` in the unnamed package, which shadow the `java.*` ones for
+student code exactly as the built-in `Scanner` does. Imports that would
+outrank them (`import java.io.File;`) are neutralised, the same way and with
+the same line-preserving trick.
+
+They talk to a **snapshot** of the editor's files held in the worker for the
+duration of the run, over the same channel the console input bridge uses. That
+channel carries any UTF-16 code unit unaltered, so a byte in 0–255 crosses it
+untouched — which is why binary files work at all. Consequences worth knowing:
+
+* The program sees the files as they were when Run was pressed, and the editor
+  sees the program's writes when it finishes — they do not interleave.
+* Files are capped at 8 MB each and 32 MB in total per run
+  (`MAX_MOUNTED_FILE_BYTES`). Anything larger is left out rather than
+  truncated, and named in a message, because a truncated file reads as corrupt
+  data. Speed is not the reason for the cap: the channel moves about 14 million
+  characters a second, so even an 8 MB file crosses in well under a second.
+* If your own class is called `File`, `Files`, `Path`, `Paths`, `FileReader`,
+  `FileWriter` or `PrintWriter`, yours wins and file support switches itself
+  off, with a warning saying so. Rename it if you need to open a file.
+
 ## Limitations
 
 These come from the browser build of the compiler, not from jcoder, and are
@@ -170,8 +240,16 @@ worth knowing before setting an exercise.
   `java.util` and `java.io`, but not all of it, and there is no reflection worth
   relying on. See [TeaVM's own notes](https://teavm.org/docs/runtime/java-classes.html).
 * **`System.exit()` aborts the program** rather than setting an exit code.
-* **No files, no network.** There is no server and the sandbox has no filesystem
-  outside its own memory.
+* **Files are emulated.** Text and binary both work — see
+  [Reading and writing files](#reading-and-writing-files) — but they are the
+  editor's files, not your computer's, and `RandomAccessFile` has no stand-in.
+* **`getMessage()` is rewritten for you.** TeaVM names the method `getMessage0`
+  and renames it while compiling, so javac offers a name TeaVM will not link and
+  TeaVM offers one javac cannot see — neither spelling works from source. jcoder
+  rewrites `e.getMessage()` onto an injected helper that recovers the message
+  from `toString()`, so ordinary `try`/`catch` code just works. `getClass()`,
+  `getCause()` and `getLocalizedMessage()` have the same problem and are only
+  explained, not fixed — use `e.toString()`.
 * **Exception stack traces have no frames.** The generated module is obfuscated,
   so the type and message are reported but not the line.
 * **No debugger yet** — breakpoints and stepping are the obvious next step.

@@ -48,6 +48,8 @@ export interface RunnerControls extends RunnerState {
     fixedInput: string[],
     /** Class whose `main` to run, or null to let the compiler choose. */
     mainClass: string | null,
+    /** The editor's files, which the program can read and write. */
+    files: Array<{ path: string; bytes: Uint8Array }>,
   ): void
   submitInput(line: string): void
   /** Answer the next reads without the user typing again. */
@@ -57,12 +59,30 @@ export interface RunnerControls extends RunnerState {
   clearOutput(): void
 }
 
+/** What a finished program changed in the editor's filesystem. */
+export type FilesChangedHandler = (
+  changes: Array<{ path: string; bytes: Uint8Array | null }>,
+  createdFolders: string[],
+) => void
+
+export interface RunnerOptions {
+  /**
+   * Called once a run ends, with the files it touched. Kept in a ref rather
+   * than a dependency, so App can close over its current state without the
+   * worker having to be re-subscribed.
+   */
+  onFilesChanged?: FilesChangedHandler
+}
+
 /** SharedArrayBuffer needs cross-origin isolation; without it reads cannot block. */
 function canUseSharedMemory(): boolean {
   return typeof SharedArrayBuffer !== 'undefined' && globalThis.crossOriginIsolated === true
 }
 
-export function useRunner(): RunnerControls {
+export function useRunner(options: RunnerOptions = {}): RunnerControls {
+  const filesChangedRef = useRef<FilesChangedHandler | undefined>(undefined)
+  filesChangedRef.current = options.onFilesChanged
+
   // Set only in ?runtime=main mode, where there is no worker at all.
   const mainThreadToolchainRef = useRef<Toolchain | null>(null)
   // Worker mode answers input requests from here before prompting the user.
@@ -131,6 +151,10 @@ export function useRunner(): RunnerControls {
       case 'main-classes':
         setMainClasses(message.classes)
         setSelectedMainClass(message.selected)
+        break
+      case 'files-changed':
+        // Handed to App, which owns the filesystem and any connected folder.
+        filesChangedRef.current?.(message.changes, message.createdFolders)
         break
       case 'input-request': {
         // A line supplied up front answers the request without interrupting the
@@ -239,6 +263,7 @@ export function useRunner(): RunnerControls {
     args: string[],
     fixedInput: string[],
     mainClass: string | null,
+    files: Array<{ path: string; bytes: Uint8Array }>,
   ) => {
     if (!ready || running) return
     setDiagnostics([])
@@ -252,7 +277,7 @@ export function useRunner(): RunnerControls {
       if (!toolchain) { setRunning(false); return }
       // Everything below runs on the UI thread and blocks it until the
       // student's program returns.
-      void compileAndRun(toolchain, { sources, args, mainClass }, {
+      void compileAndRun(toolchain, { sources, args, mainClass, files }, {
         verbose: false,
         onStatus: (nextPhase, detail) => { setPhase(nextPhase); setStatusDetail(detail ?? '') },
         onDiagnostics: (list) => {
@@ -263,6 +288,11 @@ export function useRunner(): RunnerControls {
           }
         },
         onMainClasses: (classes, selected) => { setMainClasses(classes); setSelectedMainClass(selected) },
+        onFilesChanged: (changes, createdFolders) => {
+          if (changes.length > 0 || createdFolders.length > 0) {
+            filesChangedRef.current?.(changes, createdFolders)
+          }
+        },
         writeStdout: (text) => append('out', text),
         writeStderr: (text) => append('err', text),
         // Nothing can block here: answer from the Inputs tab, then report EOF.
@@ -280,7 +310,7 @@ export function useRunner(): RunnerControls {
       return
     }
 
-    const request: RunnerRequest = { type: 'run', sources, args, mainClass }
+    const request: RunnerRequest = { type: 'run', sources, args, mainClass, files }
     if (!postToRuntime(request)) setRunning(false)
   }, [append, mainThreadMode, ready, running])
 

@@ -76,9 +76,18 @@ export function AboutDialog({ open, onClose }: Props) {
                 declarations are not — a limitation of the browser build of the compiler.
               </li>
               <li>
-                <strong className="text-slate-200">No network or files.</strong> Sockets and real
-                file I/O are unavailable: there is no server behind this, and the WebAssembly
-                sandbox has no filesystem outside its own memory.
+                <strong className="text-slate-200">Files are the ones in the editor.</strong>{' '}
+                <code>File</code>, <code>Scanner</code>, <code>FileReader</code>,{' '}
+                <code>FileWriter</code>, <code>PrintWriter</code> and <code>Files</code> read and
+                write text; <code>FileInputStream</code>, <code>FileOutputStream</code> and{' '}
+                <code>DataInputStream</code> handle bytes. Folders work, and anything your
+                program writes appears in the file list once it finishes. There is no access to
+                your computer's own disk, files above 8 MB are left out, and{' '}
+                <code>RandomAccessFile</code> is not supported.
+              </li>
+              <li>
+                <strong className="text-slate-200">No network.</strong> Sockets and HTTP are
+                unavailable: there is no server behind this.
               </li>
               <li>
                 <strong className="text-slate-200">No debugger yet.</strong> No breakpoints, no

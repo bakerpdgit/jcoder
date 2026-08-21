@@ -27,6 +27,18 @@ export const SAB_STATE_WAITING = 0
 export const SAB_STATE_LINE_READY = 1
 export const SAB_STATE_EOF = 2
 
+/**
+ * The largest file a running program is given, and the largest set of them.
+ *
+ * The channel into the program is not the constraint — it carries about 14
+ * million characters a second, so even the per-file limit crosses in well under
+ * a second. These exist so that a workspace holding something enormous cannot
+ * turn every Run into a long copy, and so the worker's memory stays bounded.
+ * Files above the limit are left out and named in the Problems tab.
+ */
+export const MAX_MOUNTED_FILE_BYTES = 8 * 1024 * 1024
+export const MAX_MOUNTED_TOTAL_BYTES = 32 * 1024 * 1024
+
 /** Maximum console lines retained before the oldest are dropped. */
 export const CONSOLE_SCROLLBACK_LINES = 5000
 
