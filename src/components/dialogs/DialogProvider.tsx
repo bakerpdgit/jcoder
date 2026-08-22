@@ -29,10 +29,32 @@ interface AlertOptions {
   message: string
 }
 
+export interface ChoiceOption {
+  /** Returned by `choose` when this one is picked. */
+  value: string
+  label: string
+  /** The consequence of picking it, which is usually the important part. */
+  description?: string
+  destructive?: boolean
+}
+
+interface ChooseOptions {
+  title?: string
+  message: string
+  warning?: string
+  choices: ChoiceOption[]
+  cancelLabel?: string
+}
+
 interface DialogApi {
   confirm(options: ConfirmOptions): Promise<boolean>
   prompt(options: PromptOptions): Promise<string | null>
   alert(options: AlertOptions): Promise<void>
+  /**
+   * More than two ways forward — returns the chosen `value`, or null if the
+   * user backed out. A confirm cannot express "do it, but differently".
+   */
+  choose(options: ChooseOptions): Promise<string | null>
 }
 
 const DialogContext = createContext<DialogApi | null>(null)
@@ -47,6 +69,7 @@ type ActiveDialog =
   | { kind: 'confirm'; options: ConfirmOptions }
   | { kind: 'prompt'; options: PromptOptions }
   | { kind: 'alert'; options: AlertOptions }
+  | { kind: 'choose'; options: ChooseOptions }
 
 export function DialogProvider({ children }: { children: ReactNode }) {
   const [active, setActive] = useState<ActiveDialog | null>(null)
@@ -76,6 +99,10 @@ export function DialogProvider({ children }: { children: ReactNode }) {
       resolverRef.current = resolve as (result: unknown) => void
       setActive({ kind: 'alert', options })
     }),
+    choose: (options) => new Promise<string | null>((resolve) => {
+      resolverRef.current = resolve as (result: unknown) => void
+      setActive({ kind: 'choose', options })
+    }),
   }), [])
 
   const submitPrompt = () => {
@@ -94,7 +121,9 @@ export function DialogProvider({ children }: { children: ReactNode }) {
           className="modal-backdrop"
           role="presentation"
           onMouseDown={(e) => {
-            if (e.target === e.currentTarget) settle(active.kind === 'prompt' ? null : active.kind === 'confirm' ? false : undefined)
+            if (e.target !== e.currentTarget) return
+            if (active.kind === 'prompt' || active.kind === 'choose') settle(null)
+            else settle(active.kind === 'confirm' ? false : undefined)
           }}
         >
           <div className="modal-card" role="dialog" aria-modal="true">
@@ -103,8 +132,32 @@ export function DialogProvider({ children }: { children: ReactNode }) {
             )}
             <p className="whitespace-pre-wrap text-sm text-slate-300">{active.options.message}</p>
 
-            {active.kind === 'confirm' && active.options.warning && (
+            {(active.kind === 'confirm' || active.kind === 'choose') && active.options.warning && (
               <p className="confirm-warning mt-3 rounded-lg px-3 py-2 text-xs">{active.options.warning}</p>
+            )}
+
+            {active.kind === 'choose' && (
+              // Stacked rather than a row of buttons: each option carries a
+              // sentence explaining what it will do, which is the whole point.
+              <div className="mt-3 flex flex-col gap-2">
+                {active.options.choices.map(choice => (
+                  <button
+                    key={choice.value}
+                    type="button"
+                    onClick={() => settle(choice.value)}
+                    className={`rounded-lg border px-3 py-2 text-left ${
+                      choice.destructive
+                        ? 'border-red-500/60 hover:bg-red-500/10'
+                        : 'border-slate-600 hover:border-emerald-500 hover:bg-slate-700/60'
+                    }`}
+                  >
+                    <span className="block text-sm font-medium text-slate-100">{choice.label}</span>
+                    {choice.description && (
+                      <span className="mt-0.5 block text-xs text-slate-400">{choice.description}</span>
+                    )}
+                  </button>
+                ))}
+              </div>
             )}
 
             {active.kind === 'prompt' && (
@@ -128,12 +181,17 @@ export function DialogProvider({ children }: { children: ReactNode }) {
               {active.kind !== 'alert' && (
                 <button
                   type="button"
-                  onClick={() => settle(active.kind === 'prompt' ? null : false)}
+                  onClick={() => settle(active.kind === 'confirm' ? false : null)}
                   className="rounded-lg border border-slate-600 px-3 py-1.5 text-sm text-slate-300 hover:bg-slate-700"
                 >
-                  {active.kind === 'confirm' ? (active.options.cancelLabel ?? 'Cancel') : 'Cancel'}
+                  {active.kind === 'confirm' || active.kind === 'choose'
+                    ? (active.options.cancelLabel ?? 'Cancel')
+                    : 'Cancel'}
                 </button>
               )}
+              {/* The choices are the buttons for a `choose`, so there is no
+                  separate confirming one. */}
+              {active.kind !== 'choose' && (
               <button
                 type="button"
                 autoFocus={active.kind !== 'prompt'}
@@ -153,6 +211,7 @@ export function DialogProvider({ children }: { children: ReactNode }) {
                     ? (active.options.confirmLabel ?? 'OK')
                     : 'OK'}
               </button>
+              )}
             </div>
           </div>
         </div>

@@ -519,6 +519,18 @@ const UNSUPPORTED_APIS: Array<{
   message: string
 }> = [
   {
+    // The plain name resolves to jcoder's working class; the qualified one
+    // names TeaVM's, which compiles and then finds nothing. Import lines are
+    // skipped by the scanner, since those are rewritten rather than rejected.
+    pattern: /\bjava\s*\.\s*(?:io|nio\s*\.\s*file)\s*\.\s*(?:File|Files|Path|Paths|FileReader|FileWriter|PrintWriter|FileInputStream|FileOutputStream)\b/,
+    severity: 'error',
+    message:
+      'Write the plain class name rather than the full java.io / java.nio.file one.\n\n' +
+      'For example `new File("data.txt")` rather than `new java.io.File("data.txt")`. ' +
+      'The plain name is the version wired up to the files in the editor; the ' +
+      'fully-qualified one is not, and would silently find nothing.',
+  },
+  {
     // Random access is the one file API left without a stand-in: the bridge
     // hands a whole file over at once, and a playground has no use for seeking.
     pattern: /\bRandomAccessFile\b/,
@@ -528,6 +540,21 @@ const UNSUPPORTED_APIS: Array<{
       'Reading and writing a whole file does work: use FileInputStream or ' +
       'FileOutputStream for bytes, or Scanner, FileReader, FileWriter and ' +
       'PrintWriter for text.',
+  },
+  {
+    // TeaVM's WebAssembly backend raises these as machine-level traps rather
+    // than Java objects, so they sail straight through a catch — even a
+    // `catch (Exception e)` — and stop the program. Silently not catching an
+    // exception is about the worst way for this to be discovered.
+    pattern: /\bcatch\s*\(\s*(?:final\s+)?(?:java\s*\.\s*lang\s*\.\s*)?(?:ArithmeticException|ArrayIndexOutOfBoundsException|IndexOutOfBoundsException|NullPointerException)\b/,
+    severity: 'warning',
+    message:
+      'This kind of error cannot be caught here.\n\n' +
+      'Dividing by zero, reading past the end of an array and using a null ' +
+      'reference stop the program in this environment instead of being caught — ' +
+      'they come from the WebAssembly machine rather than from Java. Test for ' +
+      'them with an if beforehand. Errors that Java code throws, such as ' +
+      'NumberFormatException from Integer.parseInt, are caught normally.',
   },
   {
     pattern: /\bSystem\s*\.\s*in\b/,
@@ -561,6 +588,8 @@ export function checkUnsupportedApis(
     // student should look anyway.
     const reported = new Set<string>()
     lines.forEach((line, index) => {
+      // Imports naming a shadowed class are rewritten, not rejected.
+      if (/^[ \t]*import[ \t]/.test(line)) return
       for (const api of UNSUPPORTED_APIS) {
         if (reported.has(api.message)) continue
         // Blanked rather than deleted, so the column still lines up.

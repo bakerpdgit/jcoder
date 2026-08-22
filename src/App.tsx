@@ -12,6 +12,7 @@ import {
   PRODUCT_NAME,
 } from './constants'
 import { parseArgs } from './utils/args'
+import { EXAMPLES, examplePath, findExample } from './utils/examples'
 import { DEFAULT_LANGUAGE, getLanguage } from './utils/languages'
 import {
   DEFAULT_FS_ID, createFilesystem, deleteEntry, ensureDefaultFilesystem,
@@ -160,12 +161,19 @@ export function App() {
 
   // ── Filesystem switching ────────────────────────────────────────────────
 
-  const switchFilesystem = useCallback(async (id: string) => {
+  /**
+   * `seedStarter` creates a `Main.java` when the filesystem has no source of
+   * its own. That is right for an empty workspace and wrong for a folder from
+   * the user's computer, where it would put a file in their folder that they
+   * never asked for.
+   */
+  const switchFilesystem = useCallback(async (id: string, options: { seedStarter?: boolean } = {}) => {
+    const seedStarter = options.seedStarter !== false
     await flushSave()
     setActiveFilesystemId(id)
     setCurrentPath('/')
     try {
-      const entryPoint = await ensureLanguageEntryPoint(id, language)
+      const entryPoint = seedStarter ? await ensureLanguageEntryPoint(id, language) : null
       const sources = await getSourceFiles(id, language)
       const target = entryPoint ?? sources[0]?.path
       if (target) await openPath(id, target)
@@ -189,15 +197,42 @@ export function App() {
       })
       return
     }
+    // Asked *before* the folder picker, so the browser only ever requests the
+    // access that was actually chosen — and so nobody grants write access to a
+    // real folder without being told what that means.
+    const mode = await dialogs.choose({
+      title: 'Connect a folder on this computer',
+      message: 'How should this folder be connected?',
+      warning: 'A two-way link writes to the real folder on your computer. That includes files your programs create, and deleting a file here deletes it there.',
+      choices: [
+        {
+          value: 'link',
+          label: 'Two-way link',
+          description: 'Open the folder and keep it in step: saving, creating, renaming and deleting here are applied to the folder straight away, as is anything your programs write.',
+        },
+        {
+          value: 'import',
+          label: 'One-way import (a copy)',
+          description: 'Copy the files in now and leave the folder alone. Nothing is ever written back to your computer.',
+        },
+      ],
+    })
+    if (mode === null) return
+
     try {
-      const handle = await picker({ mode: 'readwrite' })
+      const handle = await picker({ mode: mode === 'link' ? 'readwrite' : 'read' })
       const files = await readDirectoryToMap(handle)
       const created = await createFilesystem(handle.name)
       await importFileMapToFs(created.id, files)
-      setLocalFolderHandle(handle)
-      setLocalFolderFsId(created.id)
-      await switchFilesystem(created.id)
-      showBanner(`Connected "${handle.name}". Edits here are written back to that folder.`)
+      if (mode === 'link') {
+        setLocalFolderHandle(handle)
+        setLocalFolderFsId(created.id)
+      }
+      // No starter file: this is the user's own folder, not an empty workspace.
+      await switchFilesystem(created.id, { seedStarter: false })
+      showBanner(mode === 'link'
+        ? `Linked "${handle.name}". Changes here are written to that folder.`
+        : `Imported a copy of "${handle.name}". Your folder will not be changed.`)
     } catch (error) {
       if ((error as DOMException)?.name === 'AbortError') return
       showBanner(`Could not connect the folder: ${String(error)}`)
@@ -303,6 +338,38 @@ export function App() {
   }, [activeFilesystemId, isLocalFolderConnected, openPath, showBanner, syncToLocalFolder])
   filesChangedRef.current = applyFileChanges
 
+  /**
+   * Writes a ready-made example into the current filesystem, opens it, and
+   * pins it as the class to run — so the next thing to do is press Run.
+   */
+  const addExample = useCallback(async (id: string) => {
+    const example = findExample(id)
+    if (!example) return
+    const path = examplePath(example)
+    try {
+      if (await getEntryByPath(activeFilesystemId, path)) {
+        const replace = await dialogs.confirm({
+          title: 'Replace the example?',
+          message: `${path} already exists in this filesystem.`,
+          warning: 'Any changes you have made to it will be lost.',
+          confirmLabel: 'Replace',
+          destructive: true,
+        })
+        if (!replace) return
+      }
+      await flushSave()
+      const content = encoder.encode(example.source).buffer as ArrayBuffer
+      await writeFile(activeFilesystemId, path, content, guessMimeType(path))
+      if (isLocalFolderConnected) await syncToLocalFolder({ kind: 'write', path, content })
+      await openPath(activeFilesystemId, path)
+      setMainClass(example.className)
+      setReloadTrigger(t => t + 1)
+      showBanner(`Added ${path}. Press Run to try it.`)
+    } catch (error) {
+      showBanner(`Could not add the example: ${String(error)}`)
+    }
+  }, [activeFilesystemId, dialogs, flushSave, isLocalFolderConnected, openPath, showBanner, syncToLocalFolder])
+
   const selectDiagnostic = useCallback(async (diagnostic: CompilerDiagnostic) => {
     if (!diagnostic.file) return
     if (diagnostic.file !== openFilePath) {
@@ -389,6 +456,28 @@ export function App() {
             </option>
             {mainClassOptions.map(name => (
               <option key={name} value={name}>{name}</option>
+            ))}
+          </select>
+        </label>
+
+        {/* Value is always '', so the menu reads as an action rather than a
+            setting and the same example can be added twice. */}
+        <label className="flex items-center gap-1.5 text-xs text-slate-400">
+          Examples
+          <select
+            value=""
+            onChange={(event) => {
+              const chosen = event.target.value
+              if (chosen) void addExample(chosen)
+            }}
+            title="Add a ready-made example to this filesystem"
+            className="max-w-[13rem] rounded-md border border-slate-600 bg-slate-800 px-2 py-1 text-sm text-slate-100 outline-none focus:border-emerald-500"
+          >
+            <option value="">Add…</option>
+            {EXAMPLES.map(example => (
+              <option key={example.id} value={example.id} title={example.summary}>
+                {example.label}
+              </option>
             ))}
           </select>
         </label>

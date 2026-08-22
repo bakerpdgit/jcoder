@@ -91,6 +91,10 @@ download at your own host instead.
 
 * **Run (Ctrl+Enter or F5)** — compiles *every* `.java` file in the current
   filesystem, so projects can be split across files and packages.
+* **Examples** — drops a ready-made, commented program into the current
+  filesystem and pins it as the class to run, so the next thing to do is press
+  Run. Eight of them, from a first calculation up to inheritance. Adding one
+  that is already there asks before replacing it.
 * **Main** — which class's `main` to run. *auto* prefers a class called `Main`,
   otherwise the first one alphabetically; the dropdown lists everything javac
   found so you can pin one.
@@ -114,11 +118,18 @@ download at your own host instead.
 * **About** — the ⓘ button in the top right: what this is for, what it
   deliberately cannot do, and the licences of everything it is built from. Worth
   pointing students at before they hit a limitation the hard way.
-* **Connect a folder** — reads a real folder from disk into a new filesystem and
-  mirrors every later change back to it (Chrome/Edge only; the File System
-  Access API does not exist in Firefox or Safari, where upload/download still
-  work). There is no file watching: use **Reload from the connected folder** to
-  pick up outside edits. Permissions reset on page reload.
+* **Connect a folder** — opens a real folder from disk, after asking which of
+  two things you want:
+  * **Two-way link** — every change made here is applied to the folder on your
+    computer straight away, including files your programs write and files you
+    delete. The browser is asked for write access only in this case.
+  * **One-way import** — copies the files in and never writes back.
+
+  No starter file is created either way: it is your folder, not a new
+  workspace. Chrome/Edge only — the File System Access API does not exist in
+  Firefox or Safari, where upload and download still work. There is no file
+  watching: use **Reload from the connected folder** to pick up outside edits,
+  and permissions reset on page reload.
 
 ## Reading input, and the built-in Scanner
 
@@ -240,6 +251,13 @@ worth knowing before setting an exercise.
   `java.util` and `java.io`, but not all of it, and there is no reflection worth
   relying on. See [TeaVM's own notes](https://teavm.org/docs/runtime/java-classes.html).
 * **`System.exit()` aborts the program** rather than setting an exit code.
+* **Some errors cannot be caught.** Dividing by zero, running past the end of an
+  array and dereferencing null are raised by the WebAssembly machine rather than
+  as Java objects, so they pass straight through `catch` — even
+  `catch (Exception e)` — and stop the program. Exceptions that Java code
+  *throws*, including `NumberFormatException` from `Integer.parseInt` and
+  anything you throw yourself, are caught normally. A program that catches one
+  of the uncatchable ones gets a warning before it runs.
 * **Files are emulated.** Text and binary both work — see
   [Reading and writing files](#reading-and-writing-files) — but they are the
   editor's files, not your computer's, and `RandomAccessFile` has no stand-in.

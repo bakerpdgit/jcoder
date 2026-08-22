@@ -193,7 +193,7 @@ export function ConsolePanel({
             value={fixedInput}
             onChange={(event) => onFixedInputChange(event.target.value)}
             spellCheck={false}
-            placeholder={'Ada\n21'}
+            placeholder="Enter fixed inputs here, one per line…"
             className="min-h-0 flex-1 resize-none rounded-md border border-slate-700 bg-slate-900 px-2 py-1.5 font-mono text-[13px] text-slate-100 outline-none placeholder:text-slate-600 focus:border-emerald-500"
           />
         </div>

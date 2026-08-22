@@ -173,6 +173,57 @@ test('reads and writes the files in the editor', async ({ page }) => {
   await expect(page.getByRole('button', { name: /out/ }).first()).toBeVisible({ timeout: 20_000 })
 })
 
+test('adds an example, pins it as the class to run, and runs it', async ({ page }) => {
+  await page.goto('/')
+  test.skip(!(await runtimeIsPresent(page)), 'needs public/teavm — run `npm run fetch:runtime`')
+
+  await waitForReady(page)
+  const examples = page.getByRole('combobox', { name: 'Examples' })
+  await examples.selectOption('ex3')
+
+  // The file is written, opened, and set as the class Run will use.
+  await expect(page.getByText('/Example3.java').first()).toBeVisible({ timeout: 20_000 })
+  await expect(page.getByRole('combobox', { name: 'Main' })).toHaveValue('Example3')
+
+  await page.getByTitle(/^Run/).click()
+  await expect(page.getByText('Array holds 4 numbers')).toBeVisible({ timeout: 120_000 })
+  await expect(page.getByText('exited with code 0')).toBeVisible()
+
+  // Adding it a second time asks before replacing.
+  await examples.selectOption('ex3')
+  const dialog = page.getByRole('dialog')
+  await expect(dialog.getByText(/already exists/)).toBeVisible()
+  await dialog.getByRole('button', { name: 'Cancel' }).click()
+  await expect(dialog).toBeHidden()
+})
+
+test('asks how a folder should be connected before opening the picker', async ({ page }) => {
+  await page.goto('/')
+
+  // If the picker were reached, this would record it. Cancelling must not.
+  await page.evaluate(() => {
+    ;(window as unknown as { __pickerCalled?: boolean }).__pickerCalled = false
+    ;(window as unknown as { showDirectoryPicker: unknown }).showDirectoryPicker = async () => {
+      ;(window as unknown as { __pickerCalled?: boolean }).__pickerCalled = true
+      throw Object.assign(new Error('stub'), { name: 'AbortError' })
+    }
+  })
+
+  await page.getByRole('button', { name: 'Default' }).first().click()
+  await page.getByRole('button', { name: /Connect a folder/ }).click()
+
+  const dialog = page.getByRole('dialog')
+  await expect(dialog.getByRole('button', { name: /Two-way link/ })).toBeVisible()
+  await expect(dialog.getByRole('button', { name: /One-way import/ })).toBeVisible()
+  // The consequence of a two-way link has to be stated, not implied.
+  await expect(dialog.getByText(/writes to the real folder/)).toBeVisible()
+
+  await dialog.getByRole('button', { name: 'Cancel' }).click()
+  await expect(dialog).toBeHidden()
+  expect(await page.evaluate(() => (window as unknown as { __pickerCalled?: boolean }).__pickerCalled))
+    .toBe(false)
+})
+
 test('reads and writes binary files byte for byte', async ({ page }) => {
   await page.goto('/')
   test.skip(!(await runtimeIsPresent(page)), 'needs public/teavm — run `npm run fetch:runtime`')
