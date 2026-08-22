@@ -251,13 +251,31 @@ worth knowing before setting an exercise.
   `java.util` and `java.io`, but not all of it, and there is no reflection worth
   relying on. See [TeaVM's own notes](https://teavm.org/docs/runtime/java-classes.html).
 * **`System.exit()` aborts the program** rather than setting an exit code.
-* **Some errors cannot be caught.** Dividing by zero, running past the end of an
-  array and dereferencing null are raised by the WebAssembly machine rather than
-  as Java objects, so they pass straight through `catch` — even
-  `catch (Exception e)` — and stop the program. Exceptions that Java code
-  *throws*, including `NumberFormatException` from `Integer.parseInt` and
-  anything you throw yourself, are caught normally. A program that catches one
-  of the uncatchable ones gets a warning before it runs.
+* **Some errors cannot be caught.** The dividing line is who raises the error.
+  Anything the *class library* checks and throws behaves normally —
+  `list.get(99)`, `"abc".charAt(9)`, `Integer.parseInt("zz")`,
+  `Objects.requireNonNull`, and anything you `throw` yourself, including your own
+  exception classes. Anything the *WebAssembly machine* raises passes straight
+  through `catch` — even `catch (Exception e)` — and stops the program:
+
+  | | |
+  |---|---|
+  | `arr[99]` on a raw array | stops the program |
+  | `null.something()` | stops the program |
+  | integer `/ 0` | stops the program |
+  | `new int[-1]` | stops the program |
+  | **a bad cast, `(Integer) aString`** | **silently gives `null`** |
+
+  The first four are reported with the Java exception they correspond to and a
+  note that they cannot be caught, and a program that tries to catch one gets a
+  warning before it runs. **The cast is the one to watch**, because nothing is
+  reported at all: the value simply comes out `null`. Note that `list.get(99)`
+  *is* catchable while `arr[99]` is not, so collections are the safer choice for
+  an exercise about handling errors.
+
+  All of these come from TeaVM's WasmGC backend running without its `strict`
+  option, which the browser build does not expose. See
+  [TeaVM #1106](https://github.com/konsoletyper/teavm/issues/1106).
 * **Files are emulated.** Text and binary both work — see
   [Reading and writing files](#reading-and-writing-files) — but they are the
   editor's files, not your computer's, and `RandomAccessFile` has no stand-in.

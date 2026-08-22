@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { ConsoleSink, InputBridge } from './javaPipeline'
+import { ConsoleSink, InputBridge, explainRuntimeError } from './javaPipeline'
 import { END_OF_INPUT, END_OF_LINE, MAX_LINE_CHARS, REQUEST_CHAR } from '../utils/javaSupport'
 import { STDOUT_FLUSH_THRESHOLD } from '../constants'
 import { COMMAND_CHAR } from '../utils/javaFileSystem'
@@ -168,6 +168,42 @@ describe('the filesystem bridge', () => {
     // The UI-thread host runs without one.
     const bridge = new InputBridge(() => null)
     expect(javaSend(bridge, realClock, 'R /demo.txt')).toBeNull()
+  })
+})
+
+describe('explainRuntimeError', () => {
+  // The left-hand strings are the exact messages observed from the WasmGC
+  // runtime; if TeaVM rewords one, the corresponding test starts failing and
+  // the student silently loses the explanation.
+  const observed: Array<[string, string]> = [
+    ['array element access out of bounds', 'java.lang.ArrayIndexOutOfBoundsException'],
+    ['dereferencing a null pointer', 'java.lang.NullPointerException'],
+    ['divide by zero', 'java.lang.ArithmeticException'],
+    ['divide result unrepresentable', 'java.lang.ArithmeticException'],
+    ['requested new array is too large', 'java.lang.NegativeArraySizeException'],
+    ['Maximum call stack size exceeded', 'java.lang.StackOverflowError'],
+  ]
+
+  for (const [message, exception] of observed) {
+    it(`names ${exception} for "${message}"`, () => {
+      const explained = explainRuntimeError(new Error(message))
+      expect(explained).toContain(exception)
+      expect(explained).toContain('cannot be caught here')
+      // The original wording stays, so the message is still searchable.
+      expect(explained).toContain(message)
+    })
+  }
+
+  it('leaves a real Java exception alone', () => {
+    const explained = explainRuntimeError(new Error('java.io.IOException: boom'))
+    expect(explained).toBe('Exception in thread "main" java.io.IOException: boom')
+    expect(explained).not.toContain('cannot be caught')
+  })
+
+  it('starts like Java, whatever happened', () => {
+    for (const message of ['dereferencing a null pointer', 'something unheard of']) {
+      expect(explainRuntimeError(new Error(message))).toMatch(/^Exception in thread "main" /)
+    }
   })
 })
 

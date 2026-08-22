@@ -291,6 +291,85 @@ function syntheticError(message: string): CompilerDiagnostic {
 }
 
 /**
+ * The errors WebAssembly raises by itself, and the Java exception each one
+ * stands for.
+ *
+ * TeaVM's WasmGC backend leaves these to the machine rather than emitting a
+ * check and throwing a Java object, so they arrive as a `RuntimeError` whose
+ * message is written for a compiler engineer: "dereferencing a null pointer"
+ * rather than `NullPointerException`. A student sees a stopped program and a
+ * sentence that does not look like Java at all.
+ *
+ * Naming the exception it corresponds to, and saying plainly that it cannot be
+ * caught here, turns the most confusing symptom in the environment into
+ * something a student can act on. The raw text is kept on the last line so the
+ * message is still searchable and nothing is hidden.
+ */
+const MACHINE_ERRORS: Array<{
+  pattern: RegExp
+  exception: string
+  meaning: string
+  advice: string
+}> = [
+  {
+    pattern: /array element access out of bounds|out of bounds (?:array|memory) access/i,
+    exception: 'java.lang.ArrayIndexOutOfBoundsException',
+    meaning: 'an array was used with an index it does not have',
+    advice: 'Compare the index with the array\'s length in an if before using it.',
+  },
+  {
+    pattern: /dereferencing a null pointer|null (?:pointer|reference) (?:dereference|access)/i,
+    exception: 'java.lang.NullPointerException',
+    meaning: 'a method or field was used on something that was null',
+    advice: 'Check the value against null in an if before using it.',
+  },
+  {
+    pattern: /divide by zero|division by zero|integer divide by zero/i,
+    exception: 'java.lang.ArithmeticException: / by zero',
+    meaning: 'a whole number was divided by zero',
+    advice: 'Check the divisor is not zero first. Dividing decimals by zero gives '
+      + 'Infinity instead, exactly as it does in Java.',
+  },
+  {
+    pattern: /divide result unrepresentable/i,
+    exception: 'java.lang.ArithmeticException',
+    meaning: 'a division overflowed: Integer.MIN_VALUE / -1 has no int answer',
+    advice: 'Use long for the division, or handle that case separately.',
+  },
+  {
+    pattern: /requested new array is too large|array (?:is )?too large/i,
+    exception: 'java.lang.NegativeArraySizeException',
+    meaning: 'an array was created with a negative or impossibly large size',
+    advice: 'Check the size is zero or more before creating the array.',
+  },
+  {
+    pattern: /maximum call stack size exceeded|call stack exhausted|stack overflow/i,
+    exception: 'java.lang.StackOverflowError',
+    meaning: 'a method called itself too many times',
+    advice: 'Check the recursion has a base case that stops it.',
+  },
+]
+
+/**
+ * Renders whatever ended a run as the closest thing to Java's own output.
+ *
+ * An exception the program actually threw already carries a good message and is
+ * passed through; only the machine-level errors above are rewritten.
+ */
+export function explainRuntimeError(error: unknown): string {
+  const raw = describeError(error)
+  const machine = MACHINE_ERRORS.find(candidate => candidate.pattern.test(raw))
+  if (!machine) return `Exception in thread "main" ${raw}`
+  return [
+    `Exception in thread "main" ${machine.exception}`,
+    `    ${machine.meaning}`,
+    '    This kind of error cannot be caught here — it stops the program even',
+    `    inside a try/catch. ${machine.advice}`,
+    `    (WebAssembly reported: ${raw})`,
+  ].join('\n')
+}
+
+/**
  * javac running inside WebAssembly reports its own failures as a stack
  * overflow, so the raw message is never the useful part. The cause we know of
  * is an annotation that takes arguments, which this build cannot compile.
@@ -466,7 +545,7 @@ async function runGenerated(
     // TeaVM surfaces an uncaught Java exception as a JavaScript Error whose
     // message is the Java one. Frames are not included: the generated module is
     // obfuscated, so a stack would name fake methods rather than the student's.
-    callbacks.writeStderr(`Exception in thread "main" ${describeError(error)}\n`)
+    callbacks.writeStderr(explainRuntimeError(error) + '\n')
     exitCode = 1
   } finally {
     stdout.flush()
