@@ -134,6 +134,15 @@ Do not warn about `new Scanner(System.in)` — it is the spelling the whole app 
 built around, including the starter template, and a badge on every run would
 teach students to ignore the Problems tab.
 
+### Machine errors are rewritten before the student sees them
+
+`explainRuntimeError` maps the WasmGC runtime's own wording ("dereferencing a
+null pointer") onto the Java exception it stands for, plus a line saying it
+cannot be caught. The raw text is kept on the last line so the message stays
+searchable. `javaPipeline.test.ts` pins the exact strings observed from the
+runtime — if TeaVM rewords one, that test fails rather than the student quietly
+losing the explanation.
+
 ### Some exceptions cannot be caught, and it is silent
 
 TeaVM's WasmGC backend raises `ArithmeticException`,

@@ -87,10 +87,13 @@ export function AboutDialog({ open, onClose }: Props) {
               </li>
               <li>
                 <strong className="text-slate-200">Some errors cannot be caught.</strong>{' '}
-                Dividing by zero, running off the end of an array and using a null reference
-                stop the program rather than being caught, because they come from the
-                WebAssembly machine rather than from Java. Errors that Java throws — such as{' '}
-                <code>NumberFormatException</code> — are caught as normal.
+                Dividing by zero, running off the end of an <em>array</em>, and using a null
+                reference stop the program rather than being caught, because they come from the
+                WebAssembly machine rather than from Java. Errors the class library throws are
+                caught as normal — including <code>list.get(99)</code>,{' '}
+                <code>Integer.parseInt</code> and anything you throw yourself. One to watch:
+                a cast to the wrong type, such as <code>(Integer) someText</code>, quietly
+                gives <code>null</code> instead of failing.
               </li>
               <li>
                 <strong className="text-slate-200">No network.</strong> Sockets and HTTP are
