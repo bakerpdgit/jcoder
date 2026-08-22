@@ -134,6 +134,26 @@ Do not warn about `new Scanner(System.in)` — it is the spelling the whole app 
 built around, including the starter template, and a badge on every run would
 teach students to ignore the Problems tab.
 
+### Some exceptions cannot be caught, and it is silent
+
+TeaVM's WasmGC backend raises `ArithmeticException`,
+`ArrayIndexOutOfBoundsException` and `NullPointerException` as machine traps,
+not Java objects, so a `catch` — including `catch (Exception e)` — simply does
+not run and the program stops. Anything Java code `throw`s is caught normally,
+custom exception classes included. `checkUnsupportedApis` warns when a program
+catches one of the three, because silently not catching is the worst way to
+find out. The examples must not rely on it either — `examples.test.ts` runs the
+same check over every one of them.
+
+### Examples have to compile, and nothing in CI proves it
+
+`utils/examples.ts` is plain Java text, so a mistake in it only shows up when a
+student picks it from the menu. `examples.test.ts` covers what can be checked
+without a compiler — the class name matches the file, there is a `main`, no
+annotation takes arguments, no fully-qualified `java.io.File`, no pre-flight
+warning — but compiling them needs the browser. After changing an example, run
+it.
+
 ### The injected Java is a TypeScript template literal
 
 So `'\n'` written with one backslash becomes a *real newline* inside a Java

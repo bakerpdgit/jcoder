@@ -86,6 +86,13 @@ export function AboutDialog({ open, onClose }: Props) {
                 <code>RandomAccessFile</code> is not supported.
               </li>
               <li>
+                <strong className="text-slate-200">Some errors cannot be caught.</strong>{' '}
+                Dividing by zero, running off the end of an array and using a null reference
+                stop the program rather than being caught, because they come from the
+                WebAssembly machine rather than from Java. Errors that Java throws — such as{' '}
+                <code>NumberFormatException</code> — are caught as normal.
+              </li>
+              <li>
                 <strong className="text-slate-200">No network.</strong> Sockets and HTTP are
                 unavailable: there is no server behind this.
               </li>
