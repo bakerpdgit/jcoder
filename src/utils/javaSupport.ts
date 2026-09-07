@@ -54,6 +54,9 @@
 import {
   FILE_SUPPORT_PATH, FILE_SUPPORT_SOURCE, SHADOWED_IMPORTS,
 } from './javaFileSystem'
+import {
+  MATH_HELPER_CLASSES, MATH_HELPER_PATH, MATH_HELPER_SOURCE, rewriteDivision,
+} from './javaDivision'
 
 export { FILE_SUPPORT_PATH } from './javaFileSystem'
 
@@ -546,15 +549,19 @@ const UNSUPPORTED_APIS: Array<{
     // than Java objects, so they sail straight through a catch — even a
     // `catch (Exception e)` — and stop the program. Silently not catching an
     // exception is about the worst way for this to be discovered.
-    pattern: /\bcatch\s*\(\s*(?:final\s+)?(?:java\s*\.\s*lang\s*\.\s*)?(?:ArithmeticException|ArrayIndexOutOfBoundsException|IndexOutOfBoundsException|NullPointerException)\b/,
+    //
+    // ArithmeticException is deliberately *not* listed: `javaDivision` rewrites
+    // division onto a helper that throws a real one, so catching it works.
+    pattern: /\bcatch\s*\(\s*(?:final\s+)?(?:java\s*\.\s*lang\s*\.\s*)?(?:ArrayIndexOutOfBoundsException|IndexOutOfBoundsException|NullPointerException)\b/,
     severity: 'warning',
     message:
       'This kind of error cannot be caught here.\n\n' +
-      'Dividing by zero, reading past the end of an array and using a null ' +
-      'reference stop the program in this environment instead of being caught — ' +
-      'they come from the WebAssembly machine rather than from Java. Test for ' +
-      'them with an if beforehand. Errors that Java code throws, such as ' +
-      'NumberFormatException from Integer.parseInt, are caught normally.',
+      'Reading past the end of an array and using a null reference stop the ' +
+      'program in this environment instead of being caught — they come from the ' +
+      'WebAssembly machine rather than from Java. Test for them with an if ' +
+      'beforehand. Errors that Java code throws are caught normally, including ' +
+      'dividing by zero, NumberFormatException from Integer.parseInt, and ' +
+      'anything you throw yourself.',
   },
   {
     pattern: /\bSystem\s*\.\s*in\b/,
@@ -677,11 +684,22 @@ export function planCompilation(
   const fileSupportBlockedBy = FILE_SUPPORT_CLASSES.filter(name => studentTypes.has(name))
   const withFileSupport = fileSupportBlockedBy.length === 0
 
+  // As with `Path` above, a student's own JCoderMath wins and the division
+  // checks are simply left out rather than colliding with it.
+  const withDivisionChecks = !MATH_HELPER_CLASSES.some(name => studentTypes.has(name))
+
   let rewroteGetMessage = false
+  let rewroteDivision = false
   const units: CompilationUnit[] = sources.map((source) => {
     const prepared = prepareSource(source.text, { shadowFileClasses: withFileSupport })
-    const text = declaresGetMessage ? prepared : rewriteGetMessage(prepared)
-    if (text !== prepared) rewroteGetMessage = true
+    const named = declaresGetMessage ? prepared : rewriteGetMessage(prepared)
+    if (named !== prepared) rewroteGetMessage = true
+    // Blanked again rather than reused: the getMessage rewrite above has just
+    // changed the text, so an earlier mask would no longer line up with it.
+    const text = withDivisionChecks
+      ? rewriteDivision(named, blankLiteralsAndComments(named))
+      : named
+    if (text !== named) rewroteDivision = true
     return { path: toCompilerPath(source.path), text, injected: false }
   })
 
@@ -706,6 +724,11 @@ export function planCompilation(
   const definesOwnHelper = units.some(unit => unit.path === ERROR_HELPER_PATH)
   if (rewroteGetMessage && !definesOwnHelper) {
     units.unshift({ path: ERROR_HELPER_PATH, text: ERROR_HELPER_SOURCE, injected: true })
+  }
+
+  const definesOwnMath = units.some(unit => unit.path === MATH_HELPER_PATH)
+  if (rewroteDivision && !definesOwnMath) {
+    units.unshift({ path: MATH_HELPER_PATH, text: MATH_HELPER_SOURCE, injected: true })
   }
   return { units, fileSupportBlockedBy }
 }

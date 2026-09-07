@@ -6,6 +6,7 @@ import {
   prepareSource, scannerSource, toCompilerPath, toVfsPath,
 } from './javaSupport'
 import { FILE_SUPPORT_PATH, FILE_SUPPORT_SOURCE } from './javaFileSystem'
+import { MATH_HELPER_PATH } from './javaDivision'
 import { LANGUAGES } from './languages'
 
 /** The Scanner as it is injected in the normal case, with file support. */
@@ -324,6 +325,45 @@ describe('declaredTypeNames', () => {
   it('ignores names inside strings and comments', () => {
     expect([...declaredTypeNames('// class Ghost\nString s = "class Other";\nclass Real {}')])
       .toEqual(['Real'])
+  })
+})
+
+describe('the division checks', () => {
+  it('rewrites a division and carries the helper', () => {
+    const units = buildCompilationUnits([
+      { path: '/Main.java', text: 'class Main { int f(int a, int b) { return a / b; } }' },
+    ])
+    expect(units.find(u => u.path === 'Main.java')!.text).toContain('JCoderMath.div(')
+    expect(units.some(u => u.path === MATH_HELPER_PATH)).toBe(true)
+  })
+
+  it('carries the helper only when something needed it', () => {
+    const units = buildCompilationUnits([
+      { path: '/Main.java', text: 'class Main { int f() { return 6 / 2; } }' },
+    ])
+    // Division by a non-zero literal is left alone, so nothing needs checking.
+    expect(units.some(u => u.path === MATH_HELPER_PATH)).toBe(false)
+  })
+
+  it('stands aside for a student who declares their own JCoderMath', () => {
+    const units = buildCompilationUnits([
+      { path: '/Main.java', text: 'class Main { int f(int a, int b) { return a / b; } }' },
+      { path: '/JCoderMath.java', text: 'class JCoderMath { }' },
+    ])
+    expect(units.find(u => u.path === 'Main.java')!.text).toContain('a / b')
+    expect(units.filter(u => u.path === MATH_HELPER_PATH && u.injected)).toHaveLength(0)
+  })
+
+  it('rewrites after getMessage, not before', () => {
+    // Both rewrites touch the same line; the division scan runs on the text the
+    // getMessage rewrite produced, so its mask has to be rebuilt in between.
+    const units = buildCompilationUnits([{
+      path: '/Main.java',
+      text: 'class Main { void f(Exception e, int a, int b) { print(e.getMessage() + a / b); } }',
+    }])
+    const main = units.find(u => u.path === 'Main.java')!
+    expect(main.text).toContain('JCoderErr.messageOf(e)')
+    expect(main.text).toContain('JCoderMath.div(')
   })
 })
 

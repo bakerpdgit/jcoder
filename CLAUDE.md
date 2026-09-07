@@ -143,16 +143,53 @@ searchable. `javaPipeline.test.ts` pins the exact strings observed from the
 runtime — if TeaVM rewords one, that test fails rather than the student quietly
 losing the explanation.
 
+### Division is rewritten so that dividing by zero can be caught
+
+`utils/javaDivision.ts` turns `a / b` into `JCoderMath.div(a, b)`, and `x /= y`
+into `x /= JCoderMath.divisor(x, y)`, injecting a helper whose `int` and `long`
+overloads throw a real `ArithmeticException`. TeaVM declined to check division
+itself (konsoletyper/teavm#1249: too expensive without range analysis), and
+`strict` mode does not cover it, so this is the only case jcoder has to fix in
+the source rather than in the toolchain.
+
+**Both operands are passed on purpose.** Overload resolution then promotes the
+pair exactly as the division would, so `total / count` on two ints reaches
+`div(int, int)` and throws, while `1.0 / 0` widens to `div(double, double)` and
+stays `Infinity`. Guarding only the divisor is half the code and gets that
+second case wrong — do not "simplify" it that way.
+
+The backwards scan for the dividend is the fragile part, and it has already been
+wrong once: it swallowed the `return` of `return (double) total / n`, which
+compiled to nothing sensible, and before that dropped the cast, which silently
+turned worked example 7's average from 7.333 into 7.0. Neither showed up in the
+hand-written cases — `javaDivision.test.ts` now checks structurally that every
+operand it produces looks like an expression, over every worked example. Keep
+that test, and run an example in the browser after touching the scan.
+
+`checkUnsupportedApis` therefore does **not** warn about catching
+`ArithmeticException`, unlike the other two.
+
 ### Some exceptions cannot be caught, and it is silent
 
-TeaVM's WasmGC backend raises `ArithmeticException`,
-`ArrayIndexOutOfBoundsException` and `NullPointerException` as machine traps,
-not Java objects, so a `catch` — including `catch (Exception e)` — simply does
-not run and the program stops. Anything Java code `throw`s is caught normally,
-custom exception classes included. `checkUnsupportedApis` warns when a program
-catches one of the three, because silently not catching is the worst way to
-find out. The examples must not rely on it either — `examples.test.ts` runs the
-same check over every one of them.
+TeaVM's WasmGC backend raises `ArrayIndexOutOfBoundsException` and
+`NullPointerException` as machine traps, not Java objects, so a `catch` —
+including `catch (Exception e)` — simply does not run and the program stops.
+
+This is a property of the *toolchain build*, not of jcoder. teavm-javac 2ddcf02
+(September 2026, closing teavm-javac#21) added a `strictMode` option that turns
+TeaVM's null, bound and cast checks back on, and `generateWebAssembly` already
+passes `strictMode: true` — but the build at `teavm.org/playground` is from June
+2025 and ignores the property, so nothing changes until `public/teavm/` is
+replaced by one built from source. Division is not covered by `strict` either,
+which is why the rewrite above exists. **Before removing any of the machinery
+here, run the 15-case battery against the actual bundle rather than trusting
+this file.**
+
+Anything Java code `throw`s is caught normally, custom exception classes
+included. `checkUnsupportedApis` warns when a program catches one of the two,
+because silently not catching is the worst way to find out. The examples must
+not rely on it either — `examples.test.ts` runs the same check over every one of
+them.
 
 ### Examples have to compile, and nothing in CI proves it
 
