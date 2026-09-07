@@ -272,6 +272,42 @@ test('e.getMessage() works, despite the class library not offering it', async ({
   await expect(page.getByText('exited with code 0')).toBeVisible()
 })
 
+test('dividing by zero throws an exception the program can catch', async ({ page }) => {
+  await page.goto('/')
+  test.skip(!(await runtimeIsPresent(page)), 'needs public/teavm — run `npm run fetch:runtime`')
+
+  await waitForReady(page)
+  await page.locator('.view-lines').click()
+  await page.keyboard.press('ControlOrMeta+A')
+  // Every case the rewrite has to get right at once: an integer division that
+  // must throw, a floating-point one that must not, a cast that must survive
+  // (dropping it makes the answer 3.0), the overflowing division the machine
+  // also refuses, and a compound assignment.
+  await page.keyboard.type(
+    'public class Main { public static void main(String[] a) { '
+    + 'int n = 0; int m = -1; '
+    + 'try { System.out.println(10 / n); } '
+    + 'catch (ArithmeticException e) { System.out.println("caught: " + e.getMessage()); } '
+    + 'System.out.println("infinity " + (1.0 / n)); '
+    + 'System.out.println("avg " + ((double) 7 / 2)); '
+    + 'System.out.println("minint " + (Integer.MIN_VALUE / m)); '
+    // Printed with a computed part, so the console text is not also visible in
+    // the editor above it, where a bare literal would match twice.
+    + 'int x = 5; try { x /= n; } '
+    + 'catch (ArithmeticException e) { System.out.println("compound " + e.getMessage()); } '
+    + 'System.out.println("finished with " + x); } }')
+
+  await page.getByTitle(/^Run/).click()
+
+  await expect(page.getByText('caught: / by zero')).toBeVisible({ timeout: 120_000 })
+  await expect(page.getByText('infinity Infinity')).toBeVisible()
+  await expect(page.getByText('avg 3.5')).toBeVisible()
+  await expect(page.getByText('minint -2147483648')).toBeVisible()
+  await expect(page.getByText("compound / by zero")).toBeVisible()
+  await expect(page.getByText("finished with 5")).toBeVisible()
+  await expect(page.getByText('exited with code 0')).toBeVisible()
+})
+
 test('reports compiler errors in the Problems tab', async ({ page }) => {
   await page.goto('/')
   test.skip(!(await runtimeIsPresent(page)), 'needs public/teavm — run `npm run fetch:runtime`')

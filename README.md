@@ -260,22 +260,58 @@ worth knowing before setting an exercise.
 
   | | |
   |---|---|
+  | integer `/ 0` and `% 0` | **caught normally** — jcoder rewrites it |
   | `arr[99]` on a raw array | stops the program |
   | `null.something()` | stops the program |
-  | integer `/ 0` | stops the program |
   | `new int[-1]` | stops the program |
   | **a bad cast, `(Integer) aString`** | **silently gives `null`** |
 
-  The first four are reported with the Java exception they correspond to and a
-  note that they cannot be caught, and a program that tries to catch one gets a
+  Division is the exception, and deliberately so: `a / b` is rewritten onto an
+  injected helper that throws a real `ArithmeticException`, so `catch` works and
+  `Integer.MIN_VALUE / -1` gives the answer the JLS specifies rather than
+  stopping. See [Division is checked](#division-is-checked).
+
+  The rest are reported with the Java exception they correspond to and a note
+  that they cannot be caught, and a program that tries to catch one gets a
   warning before it runs. **The cast is the one to watch**, because nothing is
   reported at all: the value simply comes out `null`. Note that `list.get(99)`
   *is* catchable while `arr[99]` is not, so collections are the safer choice for
   an exercise about handling errors.
 
-  All of these come from TeaVM's WasmGC backend running without its `strict`
-  option, which the browser build does not expose. See
-  [TeaVM #1106](https://github.com/konsoletyper/teavm/issues/1106).
+  The remaining three come from TeaVM's WasmGC backend running without its
+  `strict` option. See
+  [TeaVM #1106](https://github.com/konsoletyper/teavm/issues/1106) for why that
+  is the default.
+
+  **This is fixed upstream and waiting on a rebuild.**
+  [teavm-javac#21](https://github.com/konsoletyper/teavm-javac/issues/21) added
+  a `strictMode` option — on by default — and jcoder already asks for it, so a
+  toolchain built from teavm-javac 2ddcf02 (4 September 2026) or later makes
+  the null, array and cast cases behave like Java. The build published at
+  `teavm.org/playground`, which `npm run fetch:runtime` downloads, dates from
+  15 June 2025 and predates it; see
+  [Building the toolchain from source](#building-the-toolchain-from-source).
+  `strict` does not cover division, which is why jcoder handles that itself.
+* **Division is checked.** <a id="division-is-checked"></a>`a / b`, `a % b` and
+  `x /= y` are rewritten onto an injected `JCoderMath`, whose `int` and `long`
+  overloads throw `ArithmeticException` before dividing. Both operands are
+  passed, so Java's own overload resolution decides whether the division is an
+  integer one: `total / count` on two ints throws, while `1.0 / 0` stays
+  `Infinity` as the language requires.
+
+  The scan is conservative and leaves anything it cannot delimit alone —
+  division by a non-zero literal (which cannot throw, and needs to stay a
+  compile-time constant), a divisor beginning with a cast or `new`, and a
+  dividend ending in `++`. Those keep the old behaviour, and
+  `explainRuntimeError` still names them if they do fail. A rewritten line keeps
+  its line number but its columns shift, so a diagnostic on a line that divides
+  can point a few characters off.
+
+  TeaVM will not do this itself:
+  [TeaVM #1249](https://github.com/konsoletyper/teavm/issues/1249) was declined
+  because a check on every division costs more than a compiler should pay
+  without range analysis to elide it. That is the right call for a production
+  compiler and the wrong one for a playground, where programs run for seconds.
 * **Files are emulated.** Text and binary both work — see
   [Reading and writing files](#reading-and-writing-files) — but they are the
   editor's files, not your computer's, and `RandomAccessFile` has no stand-in.

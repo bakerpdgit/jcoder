@@ -88,6 +88,25 @@ export interface TeaVMCompilerDiagnostic {
   columnNumber?: number
 }
 
+/**
+ * What `Compiler.generateWebAssembly` accepts.
+ *
+ * `strictMode` was added to teavm-javac by commit 2ddcf02 (September 2026, in
+ * answer to teavm-javac#21) and turns on TeaVM's null checks, array bound
+ * checks and cast checks, which is the difference between a student's
+ * `catch (Exception e)` running and the program simply stopping. It defaults to
+ * true there, so passing it is belt and braces — but the build published at
+ * teavm.org/playground predates the commit and ignores the property entirely,
+ * which is why `explainRuntimeError` still exists. See README, "Some errors
+ * cannot be caught".
+ */
+export interface WebAssemblyOptions {
+  outputName: string
+  mainClass: string
+  /** Conformant exceptions instead of machine traps, at some cost in speed. */
+  strictMode?: boolean
+}
+
 export interface JavaCompiler {
   addSourceFile(name: string, content: string): void
   clearSourceFiles(): void
@@ -102,7 +121,7 @@ export interface JavaCompiler {
   /** Classes with a `public static void main(String[])`, fully qualified. */
   detectMainClasses(): string[]
   /** TeaVM: `.class` → `.wasm`. False when there were severe problems. */
-  generateWebAssembly(options: { outputName: string; mainClass: string }): boolean
+  generateWebAssembly(options: WebAssemblyOptions): boolean
 
   listWebAssemblyOutputFiles(): string[]
   getWebAssemblyOutputFile(name: string): Int8Array | null

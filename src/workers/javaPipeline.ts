@@ -463,7 +463,11 @@ export async function compileAndRun(
   callbacks.onStatus('generating', mainClass)
   let generated: boolean
   try {
-    generated = compiler.generateWebAssembly({ outputName: 'app', mainClass })
+    // strictMode is ignored by the toolchain currently published at
+    // teavm.org/playground; a build from teavm-javac 2ddcf02 or later honours
+    // it and makes NullPointerException, ArrayIndexOutOfBoundsException and
+    // ClassCastException catchable. Teaching is worth the lost speed.
+    generated = compiler.generateWebAssembly({ outputName: 'app', mainClass, strictMode: true })
   } catch (error) {
     publish([syntheticError(`WebAssembly generation failed: ${describeError(error)}`)])
     finish(1)
