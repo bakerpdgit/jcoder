@@ -545,23 +545,26 @@ const UNSUPPORTED_APIS: Array<{
       'PrintWriter for text.',
   },
   {
-    // TeaVM's WebAssembly backend raises these as machine-level traps rather
-    // than Java objects, so they sail straight through a catch — even a
-    // `catch (Exception e)` — and stop the program. Silently not catching an
-    // exception is about the worst way for this to be discovered.
+    // Creating an array with a negative length is the last error the WebAssembly
+    // machine raises as a trap rather than a Java object, so it sails straight
+    // through a catch — even a `catch (Exception e)` — and stops the program.
     //
-    // ArithmeticException is deliberately *not* listed: `javaDivision` rewrites
-    // division onto a helper that throws a real one, so catching it works.
-    pattern: /\bcatch\s*\(\s*(?:final\s+)?(?:java\s*\.\s*lang\s*\.\s*)?(?:ArrayIndexOutOfBoundsException|IndexOutOfBoundsException|NullPointerException)\b/,
+    // It used to have company. ArrayIndexOutOfBoundsException, NullPointerException
+    // and ClassCastException became catchable when `public/teavm/` was rebuilt with
+    // strict mode on, and ArithmeticException when `javaDivision` started rewriting
+    // division; warning about any of those now would be telling students something
+    // untrue. If this list ever grows again, check it against the runtime first —
+    // see README, "Some errors cannot be caught".
+    pattern: /\bcatch\s*\(\s*(?:final\s+)?(?:java\s*\.\s*lang\s*\.\s*)?NegativeArraySizeException\b/,
     severity: 'warning',
     message:
       'This kind of error cannot be caught here.\n\n' +
-      'Reading past the end of an array and using a null reference stop the ' +
-      'program in this environment instead of being caught — they come from the ' +
-      'WebAssembly machine rather than from Java. Test for them with an if ' +
-      'beforehand. Errors that Java code throws are caught normally, including ' +
-      'dividing by zero, NumberFormatException from Integer.parseInt, and ' +
-      'anything you throw yourself.',
+      'Creating an array with a negative length stops the program in this ' +
+      'environment instead of being caught — it comes from the WebAssembly ' +
+      'machine rather than from Java. Check the size is zero or more with an if ' +
+      'beforehand. Every other common error is caught normally, including ' +
+      'reading past the end of an array, using a null reference, a bad cast, ' +
+      'dividing by zero, and anything you throw yourself.',
   },
   {
     pattern: /\bSystem\s*\.\s*in\b/,

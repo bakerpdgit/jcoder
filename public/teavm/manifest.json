@@ -1,26 +1,34 @@
 {
-  "source": "https://teavm.org/playground",
-  "fetchedAt": "2026-08-21T09:09:18.315Z",
+  "source": "built from source",
+  "repository": "https://github.com/konsoletyper/teavm-javac",
+  "teavmJavac": {
+    "commit": "76b5b53850f74e510ec8588a56a211cf60e9d496",
+    "committedAt": "2026-11-04T08:05:55+01:00",
+    "subject": "Fix the compile class library so javac can see inner classes and read annotations",
+    "dirty": false
+  },
+  "teavmVersion": "0.17.0-dev-3",
+  "stagedAt": "2026-11-07T22:02:06.172Z",
   "files": [
     {
       "name": "compiler.wasm",
-      "bytes": 4126432,
-      "sha256": "a79245353ac623df4fde5740bb2bedacedc9c98544253f01aa4b63268f9cb8ba"
+      "bytes": 4751613,
+      "sha256": "9b5f9afc9bdf9608d43a408fabda165e11ad720fa33330b30364c460b0435852"
     },
     {
       "name": "compiler.wasm-runtime.js",
-      "bytes": 11642,
-      "sha256": "75b2b94394f162c384d42d540836375cdbb0207e6e5605b92a18ce56eb158741"
+      "bytes": 17358,
+      "sha256": "f93b235747aa178cff6f28101b507d4956ea740c36a5987f642c1e457e8d6b8e"
     },
     {
       "name": "compile-classlib-teavm.bin",
-      "bytes": 199668,
-      "sha256": "4ed72de9e6ea1b58adfaa1b75c30379d7bccde71c529f795df383d62045367d9"
+      "bytes": 211512,
+      "sha256": "312126f367b372ed8b6ab2b9bfe3cca5856f4df7982b9a7b940de14c69d2747e"
     },
     {
       "name": "runtime-classlib-teavm.bin",
-      "bytes": 2377497,
-      "sha256": "e62ab99ce291a3379abc0756a1e80f4796f00c60fee655e488b82e37b469d5b7"
+      "bytes": 2405003,
+      "sha256": "19840747de767e5916aed983e8c937a15bacab3f9eb0f908b5a4bb1b522f0490"
     }
   ]
 }

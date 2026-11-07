@@ -50,11 +50,18 @@ WebAssembly by teavm-javac. teavm-javac's own notice records that it includes no
 OpenJDK source and modifies none: OpenJDK sources are downloaded and compiled to
 bytecode during its build.
 
-java coder does not redistribute these artifacts — `public/teavm/` is excluded from
-this repository and fetched at build time from the TeaVM project's own site. If
-you choose to commit or mirror `public/teavm/` in order to deploy, you are
-redistributing the artifacts above, and the Apache-2.0 and GPLv2+CE terms travel
-with them. Ship this file alongside them.
+**java coder redistributes these artifacts.** `public/teavm/` is committed to this
+repository so that a deployment needs no extra build step, which means the files
+above travel with every clone and every deploy. The Apache-2.0 terms (TeaVM and
+teavm-javac) and the GPLv2-with-Classpath-Exception terms (the OpenJDK `javac`
+compiled into `compiler.wasm`) apply to them as distributed here, and this notice
+is the file that accompanies them — keep it alongside any copy you make.
+
+The artifacts are **built from teavm-javac's sources** rather than downloaded,
+which is what makes the fixes listed in the README's limitations section
+reachable; `public/teavm/manifest.json` records which build is in the tree.
+`npm run fetch:runtime` remains available and downloads the TeaVM project's own
+published build instead.
 
 ### JZlib
 

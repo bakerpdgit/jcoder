@@ -18,9 +18,10 @@ npm start                # serve dist/ via server.mjs
 npm run fetch:runtime    # download public/teavm/ (no JDK needed)
 ```
 
-`public/teavm/` is **not** in git and is **not** produced by `npm run build`.
-Without it the app loads and edits fine but Run reports that the bundle is
-missing. That failure path is covered by an e2e test — keep it working.
+`public/teavm/` **is** in git (see below) and is **not** produced by
+`npm run build`. Were it missing, the app would still load and edit fine but Run
+would report the bundle absent — a path covered by an e2e test, so keep it
+working.
 
 ## Testing
 
@@ -46,21 +47,26 @@ class libraries are already in memory.
 This was a real bug: the first run worked and every run after it failed with
 "Maximum call stack size exceeded". Do not "optimise" the session away.
 
-### Annotations with arguments crash javac
+### Annotations with arguments used to crash javac
 
-This build of javac has `AnnotationProxyMaker` stubbed out, so
-`java.lang.annotation.Annotation` resolves cyclically and any annotation that
-takes arguments — or any `@interface` declaration — recurses until the stack
-overflows. Marker annotations (`@Override`, `@Deprecated`,
-`@FunctionalInterface`) are fine.
+Older builds of javac had `AnnotationProxyMaker` stubbed out, so
+`java.lang.annotation.Annotation` resolved cyclically and any annotation taking
+arguments — or any `@interface` declaration — recursed until the stack
+overflowed. teavm-javac 76b5b53 fixed the compile class library so javac reads
+annotations properly, and `smoke.spec.ts` now compiles and runs an
+`@interface Marker { String value(); }` to prove the bundle still has that fix.
 
-Two consequences, both load-bearing:
+The machinery built around the old behaviour is still here and still works:
 
 * `prepareSource` strips `@SuppressWarnings(…)` from student code, and
-  `javacCrashMessage` explains the rest when it happens anyway.
-* **The injected `Scanner` must not use `@JSBody`**, which is why the input
-  bridge looks the way it does. `javaSupport.test.ts` asserts that
-  `SCANNER_SOURCE` contains no annotation with brackets — keep that test.
+  `javacCrashMessage` explains a stack overflow if one happens anyway. The strip
+  is no longer needed and can go, but that is its own change.
+* **The injected `Scanner` does not use `@JSBody`**, which is why the input
+  bridge looks the way it does. That is now a choice rather than a constraint —
+  but the bridge works, and rewriting it would be a large change for no
+  behaviour the student sees. `javaSupport.test.ts` asserts that
+  `SCANNER_SOURCE` contains no annotation with brackets; keep that test until
+  the bridge itself is reconsidered.
 
 ### The input bridge rides on two existing imports
 
@@ -169,27 +175,50 @@ that test, and run an example in the browser after touching the scan.
 `checkUnsupportedApis` therefore does **not** warn about catching
 `ArithmeticException`, unlike the other two.
 
-### Some exceptions cannot be caught, and it is silent
+### One exception cannot be caught — and the list used to be longer
 
-TeaVM's WasmGC backend raises `ArrayIndexOutOfBoundsException` and
-`NullPointerException` as machine traps, not Java objects, so a `catch` —
-including `catch (Exception e)` — simply does not run and the program stops.
+`new int[-1]` is raised by the WasmGC backend as a machine trap, not a Java
+object, so a `catch` — including `catch (Exception e)` — does not run and the
+program stops. `checkUnsupportedApis` warns about catching
+`NegativeArraySizeException` for that reason, and `examples.test.ts` runs the
+same check over every worked example.
 
-This is a property of the *toolchain build*, not of jcoder. teavm-javac 2ddcf02
-(September 2026, closing teavm-javac#21) added a `strictMode` option that turns
-TeaVM's null, bound and cast checks back on, and `generateWebAssembly` already
-passes `strictMode: true` — but the build at `teavm.org/playground` is from June
-2025 and ignores the property, so nothing changes until `public/teavm/` is
-replaced by one built from source. Division is not covered by `strict` either,
-which is why the rewrite above exists. **Before removing any of the machinery
-here, run the 15-case battery against the actual bundle rather than trusting
-this file.**
+`ArrayIndexOutOfBoundsException`, `NullPointerException` and
+`ClassCastException` **used** to behave that way and no longer do, because
+`public/teavm/` is now built from source with `strictMode` on (see below). The
+cast was the dangerous one: it produced `null` with no error at all.
+`ArithmeticException` is handled by the rewrite above.
 
-Anything Java code `throw`s is caught normally, custom exception classes
-included. `checkUnsupportedApis` warns when a program catches one of the two,
-because silently not catching is the worst way to find out. The examples must
-not rely on it either — `examples.test.ts` runs the same check over every one of
-them.
+**This list is a property of the bundle, not of the source.** Do not add to it
+or remove from it on reasoning alone — `smoke.spec.ts` has a test that runs all
+three against the real toolchain and asserts `caught ANC`, and that test is the
+authority. A bundle fetched with `npm run fetch:runtime` instead of built from
+source will fail it, correctly.
+
+### public/teavm/ is committed, and built from source
+
+It is **in git** (about 7.4 MB), so a deployment needs no Java toolchain. That
+makes this repository a redistributor of TeaVM, teavm-javac and OpenJDK's
+`javac` — `THIRD-PARTY-NOTICES.md` has to travel with it, and says so.
+
+It is built rather than downloaded because the artifacts at
+`teavm.org/playground` have not been refreshed since **15 June 2025**. Building
+from source is what supplies strict mode, javac's annotation handling and the
+`@Rename` fix. `npm run stage:runtime -- <checkout>` copies the four files in
+and records the teavm-javac commit in `manifest.json`; the build itself needs
+**JDK 25**, not the JDK 21 teavm-javac's README claims, and `:compiler:build`
+fails in `:compiler:prepareTestHarness` (an upstream missing `dependsOn` that
+Gradle 9 rejects) — pass `-x :compiler:prepareTestHarness -x :compiler:test`.
+
+Two workarounds in this file are now **unnecessary but still present**, because
+removing them is a separate change that wants its own testing:
+
+* `prepareSource` strips `@SuppressWarnings(…)`; annotations with arguments
+  compile fine now.
+* `rewriteGetMessage` / `JCoderErr`; `getMessage()` links natively now. That
+  rewrite also has a real bug — it matches `h.err.getMessage()` and emits
+  `h.JCoderErr.messageOf(err)`, because the pattern does not check for a
+  preceding dot — so deleting it fixes something rather than only simplifying.
 
 ### Examples have to compile, and nothing in CI proves it
 
