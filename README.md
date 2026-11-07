@@ -64,25 +64,51 @@ npm run dev               # http://localhost:3000
 npm run build && npm start    # production build served by server.mjs
 ```
 
-`public/teavm/` is **not** in git and is **not** produced by `npm run build`.
-Without it the app loads and edits fine, but Run reports that the bundle is
-missing and tells you which command to run. That failure path is covered by an
-e2e test — keep it working.
+`public/teavm/` **is** committed, and is **not** produced by `npm run build`, so a
+clone can be deployed without a Java toolchain anywhere in the pipeline. That
+makes this repository a redistributor of TeaVM, teavm-javac and OpenJDK's
+`javac` — see [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md), which has to
+travel with them.
+
+Should the directory ever be missing, the app still loads and edits fine, but
+Run reports that the bundle is missing and names the command to run. That
+failure path is covered by an e2e test — keep it working.
 
 ### Building the toolchain from source
 
-Only necessary if you want to pin a particular TeaVM revision or patch the
-compiler. teavm-javac needs **JDK 21** and builds with Gradle:
+This is how `public/teavm/` in this repository was produced, and it is not
+optional if you want current behaviour: the build the TeaVM project publishes at
+`teavm.org/playground` has not been refreshed since **15 June 2025**, so strict
+mode, the `@Rename` fix behind `getMessage()`, and everything else listed under
+[Limitations](#limitations) are reachable only from source.
+
+**You need JDK 25**, not the JDK 21 teavm-javac's own README asks for — its
+`settings.gradle` sets `sourceCompatibility = JavaVersion.VERSION_25`, and the
+OpenJDK 25u sources it downloads use unnamed variables (`_`), which JDK 21
+rejects as a preview feature.
 
 ```
 git clone https://github.com/konsoletyper/teavm-javac
 cd teavm-javac
-./gradlew :compiler:build
+JAVA_HOME=/path/to/jdk-25 ./gradlew :compiler:build
 ```
 
-Copy `compiler.wasm` and `compiler.wasm-runtime.js` from
-`compiler/build/generated/teavm/wasm-gc/`, and the two `*.bin` class libraries
-from `compiler/build/classlib/`, into `public/teavm/`.
+Then stage the four files, which validates them and records the commit they came
+from in `public/teavm/manifest.json`:
+
+```
+npm run stage:runtime -- ../teavm-javac
+```
+
+(Or copy by hand: `compiler.wasm` and `compiler.wasm-runtime.js` from
+`compiler/build/generated/teavm/wasm-gc/`, the two `*.bin` class libraries from
+`compiler/build/classlib/`.)
+
+To pick up TeaVM changes newer than the release teavm-javac pins, build TeaVM
+itself first — `./gradlew publishToMavenLocal` in a `konsoletyper/teavm`
+checkout publishes `0.17.0-SNAPSHOT` — then set `teavm` in teavm-javac's
+`gradle/libs.versions.toml` to that version. `mavenLocal()` is already in its
+repository list, so nothing else needs changing.
 
 `JCODER_TEAVM_BASE=https://example.com/my-build npm run fetch:runtime` points the
 download at your own host instead.
@@ -242,11 +268,6 @@ untouched — which is why binary files work at all. Consequences worth knowing:
 These come from the browser build of the compiler, not from jcoder, and are
 worth knowing before setting an exercise.
 
-* **Annotations that take arguments do not compile.** `@Override`,
-  `@Deprecated` and `@FunctionalInterface` are fine; `@SuppressWarnings("…")`
-  and any `@interface` of your own are not — javac's annotation handling is
-  stubbed out in this build and recurses until the stack overflows. jcoder
-  removes `@SuppressWarnings(…)` for you and explains the rest if it happens.
 * **The class library is a subset.** TeaVM implements much of `java.lang`,
   `java.util` and `java.io`, but not all of it, and there is no reflection worth
   relying on. See [TeaVM's own notes](https://teavm.org/docs/runtime/java-classes.html).
@@ -260,38 +281,30 @@ worth knowing before setting an exercise.
 
   | | |
   |---|---|
-  | integer `/ 0` and `% 0` | **caught normally** — jcoder rewrites it |
-  | `arr[99]` on a raw array | stops the program |
-  | `null.something()` | stops the program |
-  | `new int[-1]` | stops the program |
-  | **a bad cast, `(Integer) aString`** | **silently gives `null`** |
+  | `arr[99]` on a raw array | caught normally |
+  | `null.something()` | caught normally |
+  | a bad cast, `(Integer) aString` | caught normally |
+  | integer `/ 0` and `% 0` | caught normally — jcoder rewrites it |
+  | **`new int[-1]`** | **stops the program** |
 
-  Division is the exception, and deliberately so: `a / b` is rewritten onto an
-  injected helper that throws a real `ArithmeticException`, so `catch` works and
-  `Integer.MIN_VALUE / -1` gives the answer the JLS specifies rather than
-  stopping. See [Division is checked](#division-is-checked).
+  Only the last one is left, and a program that tries to catch it gets a warning
+  before it runs. It is also reported with the Java exception it corresponds to
+  and a note that it cannot be caught.
 
-  The rest are reported with the Java exception they correspond to and a note
-  that they cannot be caught, and a program that tries to catch one gets a
-  warning before it runs. **The cast is the one to watch**, because nothing is
-  reported at all: the value simply comes out `null`. Note that `list.get(99)`
-  *is* catchable while `arr[99]` is not, so collections are the safer choice for
-  an exercise about handling errors.
+  The first three were machine traps until `public/teavm/` was rebuilt with
+  TeaVM's `strict` option on — the cast worst of all, because it produced `null`
+  with no error whatsoever. See
+  [Building the toolchain from source](#building-the-toolchain-from-source):
+  the bundle the TeaVM project publishes still predates the option, so a jcoder
+  running that one behaves the old way.
 
-  The remaining three come from TeaVM's WasmGC backend running without its
-  `strict` option. See
-  [TeaVM #1106](https://github.com/konsoletyper/teavm/issues/1106) for why that
-  is the default.
+  Division is jcoder's own doing rather than the toolchain's: `a / b` is
+  rewritten onto an injected helper that throws a real `ArithmeticException`, so
+  `catch` works and `Integer.MIN_VALUE / -1` gives the answer the JLS specifies.
+  See [Division is checked](#division-is-checked). TeaVM gained its own checked
+  division in [#1249](https://github.com/konsoletyper/teavm/issues/1249), which
+  is newer than the release this bundle was built against.
 
-  **This is fixed upstream and waiting on a rebuild.**
-  [teavm-javac#21](https://github.com/konsoletyper/teavm-javac/issues/21) added
-  a `strictMode` option — on by default — and jcoder already asks for it, so a
-  toolchain built from teavm-javac 2ddcf02 (4 September 2026) or later makes
-  the null, array and cast cases behave like Java. The build published at
-  `teavm.org/playground`, which `npm run fetch:runtime` downloads, dates from
-  15 June 2025 and predates it; see
-  [Building the toolchain from source](#building-the-toolchain-from-source).
-  `strict` does not cover division, which is why jcoder handles that itself.
 * **Division is checked.** <a id="division-is-checked"></a>`a / b`, `a % b` and
   `x /= y` are rewritten onto an injected `JCoderMath`, whose `int` and `long`
   overloads throw `ArithmeticException` before dividing. Both operands are
@@ -424,11 +437,17 @@ useful signal from the shell and header tests.
 
 Any static host works. For Cloudflare Pages:
 
-* build command: `npm run fetch:runtime && npm run build`
+* build command: `npm run build`
 * output directory: `dist`
-* or commit `public/teavm/` (remove it from `.gitignore`) and use `npm run build`
-  alone — but see [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) first, since
-  that means redistributing the toolchain.
+
+`public/teavm/` is committed, so the build needs no Java toolchain and no
+network fetch — which also means this repository redistributes the compiler.
+See [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md), which must ship with it.
+
+To take the TeaVM project's own published build instead, run
+`npm run fetch:runtime` before `npm run build`. Be aware that it is older than
+what is committed here: see
+[Building the toolchain from source](#building-the-toolchain-from-source).
 
 ## Credits
 

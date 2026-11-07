@@ -14,6 +14,7 @@
     "test:watch": "vitest --pool=forks",
     "notices": "node scripts/build-notices.mjs",
     "fetch:runtime": "node scripts/fetch-runtime.mjs",
+    "stage:runtime": "node scripts/stage-runtime.mjs",
     "build:all": "npm run fetch:runtime && npm run build",
     "test:e2e": "playwright test"
   },

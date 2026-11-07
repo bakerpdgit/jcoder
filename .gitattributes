@@ -5,3 +5,8 @@
 *.wasm binary
 *.bin binary
 *.teadbg binary
+
+# ...and neither is the loader, strictly, but its bytes are hashed in
+# public/teavm/manifest.json. Normalising its line endings would make the file
+# in a clone disagree with the sha256 recorded for the build it came from.
+public/teavm/** -text

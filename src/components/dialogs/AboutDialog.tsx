@@ -70,12 +70,6 @@ export function AboutDialog({ open, onClose }: Props) {
                 are not available, and <code>import java.util.Scanner;</code> is removed for you.
               </li>
               <li>
-                <strong className="text-slate-200">Annotations with brackets do not compile.</strong>{' '}
-                <code>@Override</code> and <code>@FunctionalInterface</code> are fine;{' '}
-                <code>@SuppressWarnings("…")</code> and your own <code>@interface</code>{' '}
-                declarations are not — a limitation of the browser build of the compiler.
-              </li>
-              <li>
                 <strong className="text-slate-200">Files are the ones in the editor.</strong>{' '}
                 <code>File</code>, <code>Scanner</code>, <code>FileReader</code>,{' '}
                 <code>FileWriter</code>, <code>PrintWriter</code> and <code>Files</code> read and
@@ -86,14 +80,13 @@ export function AboutDialog({ open, onClose }: Props) {
                 <code>RandomAccessFile</code> is not supported.
               </li>
               <li>
-                <strong className="text-slate-200">Some errors cannot be caught.</strong>{' '}
-                Running off the end of an <em>array</em> and using a null reference stop the
-                program rather than being caught, because they come from the WebAssembly machine
-                rather than from Java. Errors the class library throws are caught as normal —
-                including <code>list.get(99)</code>, <code>Integer.parseInt</code>, dividing by
-                zero, and anything you throw yourself. One to watch: a cast to the wrong type,
-                such as <code>(Integer) someText</code>, quietly gives <code>null</code> instead
-                of failing.
+                <strong className="text-slate-200">One error cannot be caught.</strong>{' '}
+                Creating an array with a negative length, as in{' '}
+                <code>new int[-1]</code>, stops the program rather than being caught, because it
+                comes from the WebAssembly machine rather than from Java. Everything else behaves
+                as you would expect — running off the end of an array, using a null reference, a
+                bad cast, dividing by zero, <code>Integer.parseInt</code>, and anything you throw
+                yourself are all caught normally.
               </li>
               <li>
                 <strong className="text-slate-200">No network.</strong> Sockets and HTTP are

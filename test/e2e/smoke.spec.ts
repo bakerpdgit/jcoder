@@ -75,7 +75,7 @@ test('the About dialog explains the limitations and links to the licences', asyn
 
   // The limitations are the reason the dialog exists.
   await expect(dialog.getByText(/built-in Scanner/)).toBeVisible()
-  await expect(dialog.getByText(/Annotations with brackets/)).toBeVisible()
+  await expect(dialog.getByText(/cannot be caught/)).toBeVisible()
 
   // Both licence texts must actually be served, not just linked.
   for (const path of ['/third-party-notices.txt', '/monaco-third-party-notices.txt']) {
@@ -305,6 +305,61 @@ test('dividing by zero throws an exception the program can catch', async ({ page
   await expect(page.getByText('minint -2147483648')).toBeVisible()
   await expect(page.getByText("compound / by zero")).toBeVisible()
   await expect(page.getByText("finished with 5")).toBeVisible()
+  await expect(page.getByText('exited with code 0')).toBeVisible()
+})
+
+test('strict mode makes array, null and cast errors catchable', async ({ page }) => {
+  await page.goto('/')
+  test.skip(!(await runtimeIsPresent(page)), 'needs public/teavm — run `npm run fetch:runtime`')
+
+  await waitForReady(page)
+  await page.locator('.view-lines').click()
+  await page.keyboard.press('ControlOrMeta+A')
+  // These three were machine traps until `public/teavm/` was rebuilt with
+  // strict mode on, and the cast was the worst of them: it produced `null`
+  // with no error at all. If a future bundle loses strict mode they go back to
+  // stopping the program, and this test is what says so.
+  await page.keyboard.type(
+    'public class Main { public static void main(String[] a) { '
+    + 'String r = ""; '
+    + 'int[] arr = new int[3]; '
+    + 'try { int v = arr[5]; r = r + "A?" + v; } catch (ArrayIndexOutOfBoundsException e) { r = r + "A"; } '
+    + 'String s = null; '
+    + 'try { int v = s.length(); r = r + "N?" + v; } catch (NullPointerException e) { r = r + "N"; } '
+    + 'Object o = "text"; '
+    + 'try { Integer n = (Integer) o; r = r + (n == null ? "Cnull" : "C?"); } '
+    + 'catch (ClassCastException e) { r = r + "C"; } '
+    + 'System.out.println("caught " + r); } }')
+
+  await page.getByTitle(/^Run/).click()
+
+  await expect(page.getByText('caught ANC')).toBeVisible({ timeout: 120_000 })
+  await expect(page.getByText('exited with code 0')).toBeVisible()
+})
+
+test('an annotation with arguments compiles, and getMessage resolves', async ({ page }) => {
+  await page.goto('/')
+  test.skip(!(await runtimeIsPresent(page)), 'needs public/teavm — run `npm run fetch:runtime`')
+
+  await waitForReady(page)
+  await page.locator('.view-lines').click()
+  await page.keyboard.press('ControlOrMeta+A')
+  // An `@interface` taking a value used to overflow javac's stack, and
+  // `getMessage()` on a receiver `rewriteGetMessage` leaves alone used to fail
+  // to link. Both were fixed in teavm-javac; this is what proves the bundle
+  // still has those fixes.
+  await page.keyboard.type(
+    '@interface Marker { String value(); } '
+    + '@Marker("hello") class Tagged { } '
+    + 'public class Main { public static void main(String[] a) { '
+    + 'System.out.println("tagged " + (new Tagged() != null)); '
+    + 'Object o = new java.io.IOException("deep"); '
+    + 'System.out.println("message " + ((Exception) o).getMessage()); } }')
+
+  await page.getByTitle(/^Run/).click()
+
+  await expect(page.getByText('tagged true')).toBeVisible({ timeout: 120_000 })
+  await expect(page.getByText('message deep')).toBeVisible()
   await expect(page.getByText('exited with code 0')).toBeVisible()
 })
 
