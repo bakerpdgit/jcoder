@@ -24,23 +24,10 @@ jobs:
       - name: Type-check and build
         run: npm run build
 
-      # The toolchain is a ~6.7MB download from teavm.org. Cache it so the e2e
-      # job does not re-fetch it on every run, and so a teavm.org outage does
-      # not turn into a red build.
-      - name: Cache the TeaVM toolchain
-        id: teavm-cache
-        uses: actions/cache@v4
-        with:
-          path: public/teavm
-          key: teavm-playground-v1
-
-      - name: Fetch the TeaVM toolchain
-        if: steps.teavm-cache.outputs.cache-hit != 'true'
-        run: npm run fetch:runtime
-        continue-on-error: true
-
-      # Rebuild so dist/ picks up public/teavm/, then run the browser tests.
-      # The runtime-dependent specs skip themselves if the fetch above failed.
-      - run: npm run build
+      # `public/teavm/` is committed, so checkout already has the exact bundle
+      # that ships. This used to restore a cached `npm run fetch:runtime`
+      # download over it — which would now replace a build made from source
+      # with the June 2025 one from teavm.org and fail the strict-mode specs,
+      # correctly but confusingly. Do not reintroduce that cache.
       - run: npx playwright install --with-deps chromium
       - run: npm run test:e2e
