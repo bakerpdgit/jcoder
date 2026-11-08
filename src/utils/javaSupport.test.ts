@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
-  END_OF_INPUT, END_OF_LINE, ERROR_HELPER_PATH, REQUEST_CHAR,
-  ERROR_HELPER_SOURCE, SUPPORT_SOURCE_PATH, blankLiteralsAndComments, buildCompilationUnits,
+  END_OF_INPUT, END_OF_LINE, REQUEST_CHAR,
+  SUPPORT_SOURCE_PATH, blankLiteralsAndComments, buildCompilationUnits,
   checkUnsupportedApis, chooseMainClass, declaredTypeNames, planCompilation,
   prepareSource, scannerSource, toCompilerPath, toVfsPath,
 } from './javaSupport'
@@ -46,25 +46,16 @@ describe('prepareSource', () => {
     expect(prepareSource(source)).toBe(source)
   })
 
-  it('removes @SuppressWarnings, which this javac cannot compile', () => {
-    const result = prepareSource('public class Main {\n @SuppressWarnings("unchecked") void m() {}\n}')
-    expect(result).not.toContain('@SuppressWarnings(')
-    expect(result).toContain('void m() {}')
-    expect(result.split('\n')).toHaveLength(3)
+  it('leaves @SuppressWarnings alone, now that javac accepts it', () => {
+    // It was stripped for years, because annotations taking arguments
+    // overflowed javac's stack in the old bundle. smoke.spec.ts compiles an
+    // @interface with a value against the real toolchain to prove it no longer
+    // does; if that test ever fails, this strip is what has to come back.
+    const source = 'public class Main {\n @SuppressWarnings("unchecked") void m() {}\n}'
+    expect(prepareSource(source)).toBe(source)
   })
 
-  it('handles an array-valued @SuppressWarnings', () => {
-    const result = prepareSource('@SuppressWarnings({"a", "b"}) class Main {}')
-    expect(result).not.toContain('@SuppressWarnings(')
-    expect(result).toContain('class Main {}')
-  })
-
-  it('never collapses lines, even when an annotation spans them', () => {
-    const source = 'class Main {\n @SuppressWarnings(\n "unchecked")\n void m() {}\n}'
-    expect(prepareSource(source).split('\n')).toHaveLength(source.split('\n').length)
-  })
-
-  it('leaves marker annotations alone, since those do compile', () => {
+  it('leaves marker annotations alone too', () => {
     const source = 'public class Main {\n @Override public String toString() { return ""; }\n}'
     expect(prepareSource(source)).toBe(source)
   })
@@ -132,7 +123,6 @@ describe('the injected Java is well formed', () => {
     ['Scanner', scannerSource(true)],
     ['Scanner (no file support)', scannerSource(false)],
     ['file support', FILE_SUPPORT_SOURCE],
-    ['getMessage helper', ERROR_HELPER_SOURCE],
   ]
 
   /**
@@ -354,63 +344,40 @@ describe('the division checks', () => {
     expect(units.filter(u => u.path === MATH_HELPER_PATH && u.injected)).toHaveLength(0)
   })
 
-  it('rewrites after getMessage, not before', () => {
-    // Both rewrites touch the same line; the division scan runs on the text the
-    // getMessage rewrite produced, so its mask has to be rebuilt in between.
+  it('rewrites a division sharing a line with a method call', () => {
+    // The division scan runs on `prepareSource` output and rebuilds its own
+    // mask from it, so anything else on the line has to survive untouched.
     const units = buildCompilationUnits([{
       path: '/Main.java',
       text: 'class Main { void f(Exception e, int a, int b) { print(e.getMessage() + a / b); } }',
     }])
     const main = units.find(u => u.path === 'Main.java')!
-    expect(main.text).toContain('JCoderErr.messageOf(e)')
+    expect(main.text).toContain('e.getMessage()')
     expect(main.text).toContain('JCoderMath.div(')
   })
 })
 
-describe('the getMessage() stand-in', () => {
-  it('rewrites a simple call onto the helper', () => {
+describe('getMessage() and friends', () => {
+  it('leaves the call alone, because the class library now offers it', () => {
+    // These were unreachable while javac saw `getMessage0` and TeaVM linked
+    // `getMessage`; jcoder rewrote them onto an injected helper. teavm-javac
+    // 199bed0c applies @Rename properly, so the real methods resolve and the
+    // rewrite — which also mangled `h.err.getMessage()` — is gone.
+    for (const call of ['e.getMessage()', 'h.err.getMessage()', 'lookUp().getMessage()']) {
+      const text = `class Main { void f(Exception e) { print(${call}); } }`
+      const units = buildCompilationUnits([{ path: '/Main.java', text }])
+      const main = units.find(u => u.path === 'Main.java')!
+      expect(main.text).toContain(call)
+      expect(main.text).not.toContain('JCoderErr')
+    }
+  })
+
+  it('injects no helper for it at all', () => {
     const units = buildCompilationUnits([
       { path: '/Main.java', text: 'class Main { void f(Exception e) { print(e.getMessage()); } }' },
     ])
-    const main = units.find(u => u.path === 'Main.java')!
-    expect(main.text).toContain('JCoderErr.messageOf(e)')
-    expect(main.text).not.toContain('e.getMessage()')
-  })
-
-  it('carries the helper only when something needed it', () => {
-    const withCall = buildCompilationUnits([
-      { path: '/Main.java', text: 'class Main { void f(Exception e) { print(e.getMessage()); } }' },
-    ])
-    expect(withCall.some(u => u.path === ERROR_HELPER_PATH)).toBe(true)
-
-    const without = buildCompilationUnits([{ path: '/Main.java', text: 'class Main {}' }])
-    expect(without.some(u => u.path === ERROR_HELPER_PATH)).toBe(false)
-  })
-
-  it('leaves the code alone when the student declares their own getMessage', () => {
-    const units = buildCompilationUnits([
-      { path: '/Main.java', text: 'class Main { void f(Boom e) { print(e.getMessage()); } }' },
-      { path: '/Boom.java', text: 'class Boom extends Exception { public String getMessage() { return "x"; } }' },
-    ])
-    const main = units.find(u => u.path === 'Main.java')!
-    expect(main.text).toContain('e.getMessage()')
-    expect(units.some(u => u.path === ERROR_HELPER_PATH)).toBe(false)
-  })
-
-  it('leaves a call on a complex receiver for the compiler to explain', () => {
-    // A regular expression cannot know the type here, and guessing would change
-    // what the program does.
-    const units = buildCompilationUnits([
-      { path: '/Main.java', text: 'class Main { void f() { print(lookUp().getMessage()); } }' },
-    ])
-    expect(units.find(u => u.path === 'Main.java')!.text).toContain('lookUp().getMessage()')
-  })
-
-  it('keeps the line count so diagnostics stay aligned', () => {
-    const text = 'class Main {\n  void f(Exception e) {\n    print(e.getMessage());\n  }\n}'
-    const units = buildCompilationUnits([{ path: '/Main.java', text }])
-    const main = units.find(u => u.path === 'Main.java')!
-    expect(main.text.split('\n')).toHaveLength(text.split('\n').length)
+    expect(units.some(u => u.path === 'JCoderErr.java')).toBe(false)
+    expect(units.some(u => u.injected && u.text.includes('JCoderErr'))).toBe(false)
   })
 })
 

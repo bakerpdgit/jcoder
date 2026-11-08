@@ -13,7 +13,7 @@
 import type { CompilerDiagnostic, RunnerPhase } from '../types'
 import { STDOUT_FLUSH_THRESHOLD } from '../constants'
 import {
-  END_OF_INPUT, END_OF_LINE, ERROR_HELPER_PATH, REQUEST_CHAR, SUPPORT_SOURCE_PATH,
+  END_OF_INPUT, END_OF_LINE, REQUEST_CHAR, SUPPORT_SOURCE_PATH,
   checkUnsupportedApis, chooseMainClass, planCompilation, toVfsPath,
   type SourceProblem,
 } from '../utils/javaSupport'
@@ -215,22 +215,14 @@ function mapSeverity(severity: string): CompilerDiagnostic['severity'] {
 /**
  * Replaces a compiler message that cannot be acted on with one that can.
  *
- * Both cases here are the same underlying problem: the class library javac
- * reads and the one TeaVM links against do not agree, so the error names an
- * internal detail the student has never heard of.
+ * There used to be a second case here, for `getMessage`, `getClass`,
+ * `getCause` and `getLocalizedMessage`: javac read the class library without
+ * `@Rename` applied and so offered names TeaVM would not link. teavm-javac
+ * 199bed0c fixed that, all four resolve, and `smoke.spec.ts` runs every one of
+ * them against the real toolchain — so the explanation went with the rewrite
+ * it accompanied.
  */
 function explainDiagnostic(message: string): string {
-  // TeaVM declares these with a `0` suffix and renames them while compiling, so
-  // javac offers a name TeaVM will not link and TeaVM offers one javac cannot
-  // see. `getMessage` is handled by rewriting it (see javaSupport); the rest
-  // can only be explained.
-  if (/cannot find symbol/.test(message)
-      && /\b(?:getMessage|getLocalizedMessage|getCause|getClass)\b/.test(message)) {
-    return `${message}\n\n` +
-      'This method is missing from the class library used here. For an exception, ' +
-      'use e.toString() — it gives the type followed by the message — or write the ' +
-      'exception straight into a string, as in ("Error: " + e).'
-  }
   // The @JSByRef failure a java.nio.file call produces, if one slipped past the
   // pre-flight check in checkUnsupportedApis.
   if (/@JSByRef/.test(message)) {
@@ -242,7 +234,7 @@ function explainDiagnostic(message: string): string {
 }
 
 function toDiagnostic(raw: TeaVMCompilerDiagnostic): CompilerDiagnostic {
-  const isInjected = raw.fileName === SUPPORT_SOURCE_PATH || raw.fileName === ERROR_HELPER_PATH
+  const isInjected = raw.fileName === SUPPORT_SOURCE_PATH
   const line = raw.lineNumber > 0 ? raw.lineNumber : 1
   const column = raw.columnNumber && raw.columnNumber > 0 ? raw.columnNumber : 1
   return {

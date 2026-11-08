@@ -56,11 +56,10 @@ overflowed. teavm-javac 76b5b53 fixed the compile class library so javac reads
 annotations properly, and `smoke.spec.ts` now compiles and runs an
 `@interface Marker { String value(); }` to prove the bundle still has that fix.
 
-The machinery built around the old behaviour is still here and still works:
+What is left of the machinery built around the old behaviour:
 
-* `prepareSource` strips `@SuppressWarnings(…)` from student code, and
-  `javacCrashMessage` explains a stack overflow if one happens anyway. The strip
-  is no longer needed and can go, but that is its own change.
+* `javacCrashMessage` still explains a stack overflow if one happens anyway.
+  The `@SuppressWarnings` strip that sat beside it is gone.
 * **The injected `Scanner` does not use `@JSBody`**, which is why the input
   bridge looks the way it does. That is now a choice rather than a constraint —
   but the bridge works, and rewriting it would be a large change for no
@@ -83,20 +82,19 @@ Both halves are generated from the constants in `utils/javaSupport.ts`.
 it against the real `InputBridge`, which is the only way the two languages get
 checked against each other — if you change the Java, change that transcription.
 
-### javac and TeaVM disagree about `@Rename`d methods
+### javac and TeaVM used to disagree about `@Rename`d methods
 
 TeaVM declares `Throwable.getMessage` as `getMessage0` with a `@Rename`
-annotation and applies the rename in its *own* compiler. The javac SDK is
-generated without applying it, so **javac sees only `getMessage0` and TeaVM
-links only `getMessage`** — neither spelling compiles and runs. The same is true
-of `getClass`, `getCause` and `getLocalizedMessage`.
+annotation and applies the rename in its *own* compiler. Older javac SDKs were
+generated without applying it, so javac saw only `getMessage0` while TeaVM
+linked only `getMessage` — neither spelling compiled and ran, and the same went
+for `getClass`, `getCause` and `getLocalizedMessage`.
 
-`getMessage()` is common enough in teaching to be worth fixing, so
-`buildCompilationUnits` rewrites the simple `identifier.getMessage()` form onto
-`JCoderErr.messageOf`, which recovers the message by splitting `toString()` on
-the first `": "`. The rewrite is switched off entirely if any source declares a
-`getMessage` of its own, because a student's override does work and must keep
-winning. Complex receivers are left alone and `explainDiagnostic` explains them.
+teavm-javac 199bed0c applies the rename when converting the class library, and
+all four now resolve. `smoke.spec.ts` calls every one of them against the real
+toolchain, which is what licenses the deletion of the `JCoderErr` rewrite that
+used to stand in for `getMessage` — and of the `explainDiagnostic` branch that
+apologised for the other three.
 
 ### Files are emulated, because none of the real APIs work
 
@@ -210,15 +208,12 @@ and records the teavm-javac commit in `manifest.json`; the build itself needs
 fails in `:compiler:prepareTestHarness` (an upstream missing `dependsOn` that
 Gradle 9 rejects) — pass `-x :compiler:prepareTestHarness -x :compiler:test`.
 
-Two workarounds in this file are now **unnecessary but still present**, because
-removing them is a separate change that wants its own testing:
-
-* `prepareSource` strips `@SuppressWarnings(…)`; annotations with arguments
-  compile fine now.
-* `rewriteGetMessage` / `JCoderErr`; `getMessage()` links natively now. That
-  rewrite also has a real bug — it matches `h.err.getMessage()` and emits
-  `h.JCoderErr.messageOf(err)`, because the pattern does not check for a
-  preceding dot — so deleting it fixes something rather than only simplifying.
+Both workarounds this bundle made unnecessary have now been removed: the
+`@SuppressWarnings` strip in `prepareSource`, and the `rewriteGetMessage` /
+`JCoderErr` machinery. The latter also carried a real bug — it matched
+`h.err.getMessage()` and emitted `h.JCoderErr.messageOf(err)`, because the
+pattern never checked for a preceding dot — so a student writing
+`this.error.getMessage()` got a baffling error. Deleting it fixed that.
 
 ### Examples have to compile, and nothing in CI proves it
 
