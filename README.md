@@ -328,8 +328,23 @@ worth knowing before setting an exercise.
 * **Files are emulated.** Text and binary both work — see
   [Reading and writing files](#reading-and-writing-files) — but they are the
   editor's files, not your computer's, and `RandomAccessFile` has no stand-in.
-* **Exception stack traces have no frames.** The generated module is obfuscated,
-  so the type and message are reported but not the line.
+* **Stack traces are real, with one gap.** An uncaught exception is reported
+  like Java's own, naming the type, the message and the lines it came through:
+
+  ```
+  Exception in thread "main" java.lang.IllegalStateException: ran out of road
+      at Main.main(Main.java:4)
+  ```
+
+  The exception's own constructor frames, TeaVM's `Fiber` plumbing and jcoder's
+  injected classes are hidden, because none of them are code the student wrote.
+  The gap is `ArrayIndexOutOfBoundsException`, which is raised by a bounds
+  check with no line mapping and so reports `at Main.main` without one.
+
+  This needs `public/teavm/deobfuscator.wasm`; without it every frame comes
+  back as `java.lang.Throwable$FakeClass.fakeMethod(Throwable.java:10931)`,
+  where the number is a wasm byte offset. `npm run stage:runtime` warns if it
+  is missing.
 * **No debugger yet** — breakpoints and stepping are the obvious next step.
 * Chrome or Edge is recommended: **Connect a folder** needs the File System
   Access API, which Firefox and Safari do not implement.

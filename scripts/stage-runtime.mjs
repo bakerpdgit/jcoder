@@ -11,8 +11,12 @@
  * since then (strict mode, `@Rename`, the annotation handling javac needs) is
  * only reachable this way. See README, "Building the toolchain from source".
  *
- *   node scripts/stage-runtime.mjs ../teavm-javac
+ *   node scripts/stage-runtime.mjs ../teavm-javac [../teavm]
  *   JCODER_TEAVM_BUILD=../teavm-javac node scripts/stage-runtime.mjs
+ *
+ * The optional second path is a konsoletyper/teavm checkout, used only for the
+ * stack deobfuscator. Leave it out and whatever is already in `public/teavm/`
+ * is kept.
  *
  * The manifest records the teavm-javac commit and the TeaVM version it pinned,
  * because `public/teavm/` is committed: without that, a deployment is four
@@ -35,6 +39,22 @@ const FILES = [
   { name: 'compile-classlib-teavm.bin', from: 'compiler/build/classlib', minBytes: 50_000 },
   { name: 'runtime-classlib-teavm.bin', from: 'compiler/build/classlib', minBytes: 500_000 },
 ]
+
+/**
+ * The stack deobfuscator, which lives in the TeaVM repository rather than
+ * teavm-javac — hence the optional second argument.
+ *
+ * Without it every frame of a student's stack trace comes back as
+ * `java.lang.Throwable$FakeClass.fakeMethod(Throwable.java:10931)`, the number
+ * being a wasm byte offset. It reads the debug info teavm-javac embeds in each
+ * generated module, so it is what turns those into real class, method and line
+ * names. It is a generic parser, not tied to one program.
+ */
+const DEOBFUSCATOR = {
+  name: 'deobfuscator.wasm',
+  from: 'tools/deobfuscator-wasm-gc/build/teavm/org/teavm/backend/wasm',
+  minBytes: 10_000,
+}
 
 function human(bytes) {
   return bytes >= 1_000_000
@@ -113,6 +133,21 @@ async function main() {
   const files = []
   for (const file of FILES) files.push(await stage(checkout, file))
 
+  const givenTeavm = process.argv[3] ?? process.env.JCODER_TEAVM_REPO
+  let deobfuscator = null
+  if (givenTeavm) {
+    const teavmCheckout = isAbsolute(givenTeavm) ? givenTeavm : resolve(process.cwd(), givenTeavm)
+    files.push(await stage(teavmCheckout, DEOBFUSCATOR))
+    deobfuscator = describeCheckout(teavmCheckout)
+  } else if (existsSync(join(OUT_DIR, DEOBFUSCATOR.name))) {
+    console.log(`  ${DEOBFUSCATOR.name.padEnd(28)} ${'kept'.padStart(8)}  (no teavm checkout given)`)
+  } else {
+    console.log(`
+Warning: no ${DEOBFUSCATOR.name}. Stack traces will show`)
+    console.log('java.lang.Throwable$FakeClass.fakeMethod rather than real frames.')
+    console.log('Pass a konsoletyper/teavm checkout as the second argument to fix that.')
+  }
+
   const source = describeCheckout(checkout)
   const teavm = await teavmVersion(checkout)
   await writeFile(
@@ -122,6 +157,7 @@ async function main() {
       repository: 'https://github.com/konsoletyper/teavm-javac',
       teavmJavac: source,
       teavmVersion: teavm,
+      deobfuscatorFrom: deobfuscator,
       stagedAt: new Date().toISOString(),
       files,
     }, null, 2) + '\n',

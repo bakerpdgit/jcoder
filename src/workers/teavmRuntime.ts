@@ -104,6 +104,7 @@ export interface WebAssemblyOptions {
   outputName: string
   mainClass: string
   /** Conformant exceptions instead of machine traps, at some cost in speed. */
+  obfuscated?: boolean
   strictMode?: boolean
 }
 

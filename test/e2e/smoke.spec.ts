@@ -375,6 +375,51 @@ test('an annotation with arguments compiles, and getMessage resolves', async ({ 
   await expect(page.getByText('exited with code 0')).toBeVisible()
 })
 
+test('an uncaught exception is named, with the line it came from', async ({ page }) => {
+  await page.goto('/')
+  test.skip(!(await runtimeIsPresent(page)), 'needs public/teavm — run `npm run fetch:runtime`')
+
+  await waitForReady(page)
+  await page.locator('.view-lines').click()
+  await page.keyboard.press('ControlOrMeta+A')
+  // One line, because Monaco's auto-indent and bracket closing make typed
+  // multi-line source unreliable here — so the line asserted below is 1.
+  await page.keyboard.type(
+    'public class Main { public static void main(String[] a) { '
+    + 'throw new IllegalStateException("ran out of road"); } }')
+
+  await page.getByTitle(/^Run/).click()
+
+  // The name comes from the `takeStackTrace` import and the frame from the
+  // deobfuscator in public/teavm/. Lose either and this falls back to
+  // "(could not fetch message)" with no frames, which is what students used
+  // to get — so this test is the guard on both.
+  await expect(page.getByText('Exception in thread "main" java.lang.IllegalStateException: ran out of road'))
+    .toBeVisible({ timeout: 120_000 })
+  await expect(page.getByText(/at Main\.main\(Main\.java:1\)/)).toBeVisible()
+  await expect(page.getByText('exited with code 1')).toBeVisible()
+})
+
+test('a null dereference is named rather than reported as a missing message', async ({ page }) => {
+  await page.goto('/')
+  test.skip(!(await runtimeIsPresent(page)), 'needs public/teavm — run `npm run fetch:runtime`')
+
+  await waitForReady(page)
+  await page.locator('.view-lines').click()
+  await page.keyboard.press('ControlOrMeta+A')
+  // getMessage() is genuinely null here, which TeaVM words as
+  // "(could not fetch message)". That must never reach the student.
+  await page.keyboard.type(
+    'public class Main { public static void main(String[] a) { '
+    + 'String s = null; System.out.println(s.length()); } }')
+
+  await page.getByTitle(/^Run/).click()
+
+  await expect(page.getByText('Exception in thread "main" java.lang.NullPointerException'))
+    .toBeVisible({ timeout: 120_000 })
+  await expect(page.getByText(/could not fetch message/)).toHaveCount(0)
+})
+
 test('reports compiler errors in the Problems tab', async ({ page }) => {
   await page.goto('/')
   test.skip(!(await runtimeIsPresent(page)), 'needs public/teavm — run `npm run fetch:runtime`')

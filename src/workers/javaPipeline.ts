@@ -11,13 +11,14 @@
  * without either of them owning a second copy of this sequence.
  */
 import type { CompilerDiagnostic, RunnerPhase } from '../types'
-import { STDOUT_FLUSH_THRESHOLD } from '../constants'
+import { RUNTIME_BASE_PATH, STDOUT_FLUSH_THRESHOLD } from '../constants'
 import {
   END_OF_INPUT, END_OF_LINE, REQUEST_CHAR, SUPPORT_SOURCE_PATH,
   checkUnsupportedApis, chooseMainClass, planCompilation, toVfsPath,
   type SourceProblem,
 } from '../utils/javaSupport'
-import { COMMAND_CHAR } from '../utils/javaFileSystem'
+import { COMMAND_CHAR, FILE_SUPPORT_PATH } from '../utils/javaFileSystem'
+import { MATH_HELPER_PATH } from '../utils/javaDivision'
 import { describeError, type Toolchain } from './bootRuntime'
 import { FileBridge, type FileChange, type FileSnapshot } from './fileBridge'
 import type { TeaVMCompilerDiagnostic, TeaVMImports } from './teavmRuntime'
@@ -342,23 +343,134 @@ const MACHINE_ERRORS: Array<{
   },
 ]
 
+/** One frame of a deobfuscated Java stack, as TeaVM's runtime hands it over. */
+export interface JavaFrame {
+  className?: string
+  method?: string
+  file?: string
+  line?: number
+}
+
+/** What the last `Throwable` constructed told the host about itself. */
+export interface ThrownDetail {
+  className: string | null
+  frames: JavaFrame[]
+}
+
+/**
+ * TeaVM says this when `getMessage()` returned null, which for an exception
+ * raised by a bounds or null check is simply the truth — there is no message.
+ * Repeating it to a student reads as a failure, so it is dropped.
+ */
+const NO_MESSAGE = /^\(could not fetch message/
+
 /**
  * Renders whatever ended a run as the closest thing to Java's own output.
  *
- * An exception the program actually threw already carries a good message and is
- * passed through; only the machine-level errors above are rewritten.
+ * `thrown` is what the host learned from the last `Throwable` the program
+ * built (see `captureThrows`). It is the only way to name the exception: once
+ * it reaches JavaScript it is an opaque wasm object, and the single channel
+ * TeaVM offers — `error.message` — gives nothing at all when the exception
+ * carries no message, which is exactly the case for the array and null checks
+ * students hit most.
  */
-export function explainRuntimeError(error: unknown): string {
+export function explainRuntimeError(error: unknown, thrown?: ThrownDetail | null): string {
   const raw = describeError(error)
-  const machine = MACHINE_ERRORS.find(candidate => candidate.pattern.test(raw))
-  if (!machine) return `Exception in thread "main" ${raw}`
-  return [
-    `Exception in thread "main" ${machine.exception}`,
-    `    ${machine.meaning}`,
-    '    This kind of error cannot be caught here — it stops the program even',
-    `    inside a try/catch. ${machine.advice}`,
-    `    (WebAssembly reported: ${raw})`,
-  ].join('\n')
+  // A named exception is a real Java object, so its own name is the truth.
+  // Consulting the machine-error table first would mistake a student's
+  // `throw new IllegalStateException("divide by zero")` for a trap and tell
+  // them, wrongly, that it cannot be caught.
+  const machine = thrown?.className
+    ? undefined
+    : MACHINE_ERRORS.find(candidate => candidate.pattern.test(raw))
+  if (machine) {
+    return [
+      `Exception in thread "main" ${machine.exception}`,
+      `    ${machine.meaning}`,
+      '    This kind of error cannot be caught here — it stops the program even',
+      `    inside a try/catch. ${machine.advice}`,
+      `    (WebAssembly reported: ${raw})`,
+    ].join('\n')
+  }
+
+  const message = NO_MESSAGE.test(raw) ? '' : raw
+  const name = thrown?.className
+  // Without a name there is nothing better to say than whatever TeaVM gave us.
+  const headline = name
+    ? `Exception in thread "main" ${name}${message ? `: ${message}` : ''}`
+    : `Exception in thread "main" ${message || 'an error with no message'}`
+
+  return [headline, ...formatFrames(thrown?.frames ?? [])].join('\n')
+}
+
+/** Files jcoder injects, which a student cannot open and did not write. */
+const INJECTED_FILES = new Set([SUPPORT_SOURCE_PATH, FILE_SUPPORT_PATH, MATH_HELPER_PATH])
+
+/**
+ * Turns raw frames into the `\tat …` lines Java prints.
+ *
+ * Three kinds are dropped. The stack is captured inside
+ * `Throwable.fillInStackTrace`, so it opens with the constructor chain of the
+ * exception itself — real Java hides that too. TeaVM's `Fiber` plumbing wraps
+ * every `main`. And jcoder's own injected classes are not the student's code:
+ * a trace through `JCoderMath.java` would name a file they cannot open, which
+ * is the same reason `toDiagnostic` hides them.
+ */
+function formatFrames(frames: JavaFrame[]): string[] {
+  let started = false
+  return frames
+    .filter((frame) => {
+      // Only leading constructors: an exception built *by* the student's own
+      // constructor further down the stack is theirs and must stay.
+      if (!started && frame.method === '<init>') return false
+      started = true
+      return true
+    })
+    .filter(frame => !(frame.className ?? '').startsWith('org.teavm.'))
+    .filter(frame => !INJECTED_FILES.has(frame.file ?? ''))
+    .filter(frame => !/\$caller\$exported|lambda\$startMain/.test(frame.method ?? ''))
+    .map(frame => `\tat ${frame.className ?? '?'}.${frame.method ?? '?'}`
+      + (frame.file ? `(${frame.file}${frame.line ? `:${frame.line}` : ''})` : ''))
+}
+
+/**
+ * Records what every `Throwable` the program builds says about itself.
+ *
+ * `Throwable.fillInStackTrace` runs in the constructor and, on Wasm GC, calls
+ * the host's `takeStackTrace` import with its own class name — the one place
+ * that name is ever visible from JavaScript. Wrapping the import is therefore
+ * how an uncaught exception gets named, and the supplier it returns is how the
+ * frames are read; both are kept and the original is still returned, so the
+ * program's own `getStackTrace()` is unaffected.
+ *
+ * The last one constructed is the one that escaped: a `throw` always follows
+ * its `new`, and nothing else runs after the throw that ends the program.
+ */
+export function captureThrows(
+  imports: TeaVMImports,
+  onThrow: (detail: ThrownDetail) => void,
+): void {
+  const core = imports.teavm as Record<string, unknown> | undefined
+  const original = core?.takeStackTrace
+  if (!core || typeof original !== 'function') return
+  core.takeStackTrace = (className: string | null) => {
+    const supplier = (original as (name: string | null) => unknown)(className)
+    const getStack = (supplier as { getStack?: () => JavaFrame[] } | null)?.getStack
+    onThrow({
+      className,
+      // Read lazily and defensively: this runs while an exception is being
+      // built, and throwing from here would replace the student's error with
+      // one of ours.
+      get frames(): JavaFrame[] {
+        try {
+          return typeof getStack === 'function' ? getStack.call(supplier) ?? [] : []
+        } catch {
+          return []
+        }
+      },
+    })
+    return supplier
+  }
 }
 
 /**
@@ -508,9 +620,24 @@ async function runGenerated(
     return callbacks.readLine()
   }, files)
 
+  // Set by `captureThrows` each time the program constructs a Throwable, so
+  // that an uncaught one can still be named after it has crossed into
+  // JavaScript and become opaque.
+  let lastThrown: ThrownDetail | null = null
+
   let exitCode = 0
   try {
     const program = await load(wasm, {
+      // Without this every frame comes back as
+      // `java.lang.Throwable$FakeClass.fakeMethod(Throwable.java:10931)`, where
+      // the number is a wasm byte offset. The deobfuscator reads the debug info
+      // teavm-javac embeds in each generated module and turns those offsets
+      // back into the student's own class, method and line.
+      stackDeobfuscator: {
+        enabled: true,
+        infoLocation: 'embedded',
+        path: `${RUNTIME_BASE_PATH}deobfuscator.wasm`,
+      },
       installImports(imports: TeaVMImports) {
         // Replaces TeaVM's defaults, which line-buffer into console.log.
         imports.teavmConsole = {
@@ -526,6 +653,7 @@ async function runGenerated(
           ...(date ?? {}),
           currentTimeMillis: () => input.currentTimeMillis(realClock),
         }
+        captureThrows(imports, detail => { lastThrown = detail })
       },
     })
 
@@ -538,10 +666,7 @@ async function runGenerated(
   } catch (error) {
     stdout.flush()
     stderr.flush()
-    // TeaVM surfaces an uncaught Java exception as a JavaScript Error whose
-    // message is the Java one. Frames are not included: the generated module is
-    // obfuscated, so a stack would name fake methods rather than the student's.
-    callbacks.writeStderr(explainRuntimeError(error) + '\n')
+    callbacks.writeStderr(explainRuntimeError(error, lastThrown) + '\n')
     exitCode = 1
   } finally {
     stdout.flush()

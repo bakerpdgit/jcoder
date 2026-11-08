@@ -194,6 +194,81 @@ describe('explainRuntimeError', () => {
     })
   }
 
+  it('names the exception from what the Throwable told the host', () => {
+    // The JS side only ever sees an opaque object; the name comes from the
+    // `takeStackTrace` import, which is why it is passed in separately.
+    const explained = explainRuntimeError(new Error('(could not fetch message)'), {
+      className: 'java.lang.ArrayIndexOutOfBoundsException',
+      frames: [{ className: 'Main', method: 'main', file: 'Main.java', line: 7 }],
+    })
+    expect(explained).toBe(
+      'Exception in thread "main" java.lang.ArrayIndexOutOfBoundsException\n'
+      + '\tat Main.main(Main.java:7)')
+  })
+
+  it('does not repeat TeaVM\'s "could not fetch message" at the student', () => {
+    // That string means getMessage() was null, which for a bounds check is
+    // simply true. Printing it reads as a failure of the tool.
+    const explained = explainRuntimeError(new Error('(could not fetch message)'), {
+      className: 'java.lang.NullPointerException', frames: [],
+    })
+    expect(explained).toBe('Exception in thread "main" java.lang.NullPointerException')
+  })
+
+  it('keeps a real message after the name', () => {
+    const explained = explainRuntimeError(new Error('broken badly'), {
+      className: 'java.lang.IllegalStateException', frames: [],
+    })
+    expect(explained).toBe('Exception in thread "main" java.lang.IllegalStateException: broken badly')
+  })
+
+  it('hides the plumbing a student did not write', () => {
+    const explained = explainRuntimeError(new Error('/ by zero'), {
+      className: 'java.lang.ArithmeticException',
+      frames: [
+        // The stack is captured inside the constructor chain…
+        { className: 'java.lang.Throwable', method: '<init>', file: 'TThrowable.java', line: 86 },
+        { className: 'java.lang.RuntimeException', method: '<init>', file: 'TRuntimeException.java', line: 33 },
+        // …then jcoder's injected helper, then TeaVM's own entry plumbing.
+        { className: 'JCoderMath', method: 'div', file: 'JCoderMath.java', line: 11 },
+        { className: 'Main', method: 'main', file: 'Main.java', line: 4 },
+        { className: 'org.teavm.runtime.Fiber', method: 'start', file: 'Fiber.java', line: 347 },
+      ],
+    })
+    expect(explained).toBe(
+      'Exception in thread "main" java.lang.ArithmeticException: / by zero\n'
+      + '\tat Main.main(Main.java:4)')
+  })
+
+  it('keeps a constructor the student actually wrote', () => {
+    // Only the *leading* constructor chain is the exception building itself.
+    const explained = explainRuntimeError(new Error('bad'), {
+      className: 'MyError',
+      frames: [
+        { className: 'java.lang.Throwable', method: '<init>', file: 'TThrowable.java', line: 86 },
+        { className: 'Main', method: 'main', file: 'Main.java', line: 2 },
+        { className: 'Board', method: '<init>', file: 'Board.java', line: 9 },
+      ],
+    })
+    expect(explained).toContain('\tat Board.<init>(Board.java:9)')
+  })
+
+  it('does not mistake a thrown exception for a machine trap', () => {
+    // The message matches the divide-by-zero pattern, but it is a real
+    // exception a student threw and is perfectly catchable.
+    const explained = explainRuntimeError(new Error('divide by zero'), {
+      className: 'java.lang.IllegalStateException', frames: [],
+    })
+    expect(explained).toBe('Exception in thread "main" java.lang.IllegalStateException: divide by zero')
+    expect(explained).not.toContain('cannot be caught')
+  })
+
+  it('still explains a trap, which carries no name at all', () => {
+    const explained = explainRuntimeError(new Error('requested new array is too large'), null)
+    expect(explained).toContain('java.lang.NegativeArraySizeException')
+    expect(explained).toContain('cannot be caught here')
+  })
+
   it('leaves a real Java exception alone', () => {
     const explained = explainRuntimeError(new Error('java.io.IOException: boom'))
     expect(explained).toBe('Exception in thread "main" java.io.IOException: boom')
