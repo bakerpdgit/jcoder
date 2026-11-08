@@ -138,14 +138,32 @@ Do not warn about `new Scanner(System.in)` — it is the spelling the whole app 
 built around, including the starter template, and a badge on every run would
 teach students to ignore the Problems tab.
 
-### Machine errors are rewritten before the student sees them
+### Naming an uncaught exception takes two tricks
 
-`explainRuntimeError` maps the WasmGC runtime's own wording ("dereferencing a
-null pointer") onto the Java exception it stands for, plus a line saying it
-cannot be caught. The raw text is kept on the last line so the message stays
-searchable. `javaPipeline.test.ts` pins the exact strings observed from the
-runtime — if TeaVM rewords one, that test fails rather than the student quietly
-losing the explanation.
+Once a Java exception reaches JavaScript it is an opaque wasm object. TeaVM's
+only channel is `error.message`, and that gives `"(could not fetch message)"`
+whenever `getMessage()` is null — which is exactly the case for the bounds and
+null checks students hit most. So:
+
+* **The type** comes from `captureThrows`, which wraps the `teavm.takeStackTrace`
+  import. `Throwable.fillInStackTrace` runs in every constructor and passes its
+  own class name to that import; it is the only place the name is visible from
+  JS. The last one constructed is the one that escaped, because a `throw`
+  always follows its `new` and nothing runs after the throw that ends the run.
+* **The frames** come from `public/teavm/deobfuscator.wasm`, enabled by the
+  `stackDeobfuscator` option on `load`. Without it every frame is
+  `java.lang.Throwable$FakeClass.fakeMethod(Throwable.java:10931)`, the number
+  being a wasm byte offset. That file comes from the *TeaVM* repository, not
+  teavm-javac — hence the second argument to `stage:runtime`.
+
+`explainRuntimeError` prefers the name over the `MACHINE_ERRORS` table, and
+must keep doing so: a student's `throw new IllegalStateException("divide by
+zero")` would otherwise be reported as an uncatchable trap. The table is only
+for genuine traps, which carry no name at all.
+
+Frames for the exception's own constructor chain, `org.teavm.*`, and jcoder's
+injected files are dropped — the student wrote none of them, and cannot open
+the last. Two e2e tests pin all of this against the real toolchain.
 
 ### Division is rewritten so that dividing by zero can be caught
 

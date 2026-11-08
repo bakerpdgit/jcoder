@@ -8,7 +8,13 @@
     "dirty": false
   },
   "teavmVersion": "0.17.0-dev-3",
-  "stagedAt": "2026-11-07T22:02:06.172Z",
+  "deobfuscatorFrom": {
+    "commit": "80152835bdfe6aaef5b8774d2ca56b1b592284ad",
+    "committedAt": "2026-11-07T20:33:14+01:00",
+    "subject": "c: preserve precise types of values restored from fiber stack",
+    "dirty": false
+  },
+  "stagedAt": "2026-11-08T07:51:25.775Z",
   "files": [
     {
       "name": "compiler.wasm",
@@ -29,6 +35,11 @@
       "name": "runtime-classlib-teavm.bin",
       "bytes": 2405003,
       "sha256": "19840747de767e5916aed983e8c937a15bacab3f9eb0f908b5a4bb1b522f0490"
+    },
+    {
+      "name": "deobfuscator.wasm",
+      "bytes": 48583,
+      "sha256": "6462127c5e078700d08f06956545750b7db7f6055bb4a92bf4bf60925b413aa4"
     }
   ]
 }
