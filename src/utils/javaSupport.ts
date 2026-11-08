@@ -28,16 +28,18 @@
  * ## Why the input bridge looks so strange
  *
  * The obvious way for the injected Scanner to reach JavaScript is TeaVM's
- * `@JSBody`. It cannot be used here: the browser build of javac cannot compile
- * *any* annotation that takes arguments. Its `AnnotationProxyMaker` is stubbed
- * out, so `java.lang.annotation.Annotation` resolves cyclically and javac
- * recurses until the stack overflows. Marker annotations (`@Override`,
- * `@Deprecated`, `@FunctionalInterface`) are fine; `@JSBody(...)` — and, for
- * the same reason, `@SuppressWarnings("...")` in student code — are not.
+ * `@JSBody`. When this bridge was written it could not be used: that build of
+ * javac had `AnnotationProxyMaker` stubbed out, so any annotation taking
+ * arguments recursed until the stack overflowed. teavm-javac has since fixed
+ * that, and the bundle in `public/teavm/` compiles `@JSBody` perfectly well —
+ * so this is now a design that has outlived its reason rather than a
+ * constraint. It is kept because it works, is synchronous, and needs nothing
+ * of the compiler; replacing it would be a large change for no difference a
+ * student could see.
  *
- * That rules out declaring a new import, so the bridge is built out of two
- * imports the generated module *already* has, both of which the host can
- * intercept when it instantiates the module (see `javaPipeline`):
+ * No new import is declared, so the bridge is built out of two imports the
+ * generated module *already* has, both of which the host can intercept when it
+ * instantiates the module (see `javaPipeline`):
  *
  *   - `System.err` reaches JavaScript one character at a time. Writing
  *     `REQUEST_CHAR` is the request for a line; the host swallows that
@@ -336,11 +338,11 @@ const SCANNER_FILE_CONSTRUCTOR = `
 `
 
 /**
- * Rewrites the few constructs the browser compiler cannot accept.
+ * Rewrites the one construct the browser compiler cannot accept.
  *
- * Both replacements keep the source on the same line and the same number of
- * lines — blanking or deleting one would shift every diagnostic below it and
- * send the Problems tab to the wrong place.
+ * The replacement keeps the source on the same line and the same number of
+ * lines — blanking or deleting it would shift every diagnostic below and send
+ * the Problems tab to the wrong place.
  */
 export function prepareSource(
   text: string,
@@ -353,11 +355,6 @@ export function prepareSource(
       /^[ \t]*import[ \t]+java[ \t]*\.[ \t]*util[ \t]*\.[ \t]*Scanner[ \t]*;[ \t]*$/gm,
       '// [jcoder] Scanner is built in — this import was removed automatically.',
     )
-    // An annotation with arguments crashes the browser build of javac, and this
-    // one only ever silences warnings, so dropping it changes nothing that runs.
-    // The character class excludes newlines on purpose: matching across lines
-    // would collapse them and shift every diagnostic below.
-    .replace(/@SuppressWarnings[ \t]*\([^)\r\n]*\)/g, '/* @SuppressWarnings */')
 }
 
 /** Builds the pattern that matches a single-type import of `qualifiedName`. */
@@ -385,72 +382,6 @@ function stripShadowedImports(text: string): string {
   }
   return result
 }
-
-/** `e.getMessage()` written against a plain variable — the form worth rewriting. */
-const SIMPLE_GET_MESSAGE = /\b([A-Za-z_$][\w$]*)[ \t]*\.[ \t]*getMessage[ \t]*\([ \t]*\)/g
-
-/** A `getMessage` method of the student's own, which must be left alone. */
-const DECLARES_GET_MESSAGE = /\b(?:String|CharSequence|Object)[ \t]+getMessage[ \t]*\([ \t]*\)/
-
-/**
- * Points `e.getMessage()` at the stand-in, since the real one cannot be called
- * (see `ERROR_HELPER_SOURCE`).
- *
- * Only the simple `identifier.getMessage()` form is rewritten. Anything more
- * involved — `lookUp().getMessage()`, `this.error.getMessage()` — is left for
- * javac to reject, with the explanation `explainDiagnostic` attaches, because a
- * regular expression cannot tell what the receiver's type is and guessing wrong
- * would silently change what the program does.
- */
-export function rewriteGetMessage(text: string): string {
-  return text.replace(SIMPLE_GET_MESSAGE, (whole, receiver: string) =>
-    // `JCoderErr.messageOf(...)` would itself match on a later pass; it never
-    // sees one, but keeping the guard makes the function safe to apply twice.
-    receiver === 'JCoderErr' ? whole : `JCoderErr.messageOf(${receiver})`)
-}
-
-/** Path of the injected `Throwable.getMessage()` stand-in. */
-export const ERROR_HELPER_PATH = 'JCoderErr.java'
-
-/**
- * A stand-in for `Throwable.getMessage()`, which cannot be called at all here.
- *
- * TeaVM declares the method as `getMessage0` and annotates it `@Rename`, and
- * only its *own* compiler applies that rename. So javac — which reads the SDK
- * as-is — offers `getMessage0` and not `getMessage`, while TeaVM links
- * `getMessage` and not `getMessage0`. Neither name works from source: the two
- * halves of the toolchain disagree about what the method is called.
- *
- * `toString()` works in both, and `Throwable.toString()` is defined as the
- * class name, then ": ", then the message. So the message can be recovered by
- * splitting on the first ": " — a class name can contain neither a colon nor a
- * space, so the first occurrence is always the separator, and its absence
- * always means there was no message.
- *
- * `getClass()` is unavailable for exactly the same reason as `getMessage()`,
- * which is why the class name is not obtained directly.
- */
-export const ERROR_HELPER_SOURCE = `/**
- * Recovers Throwable.getMessage(), which cannot be called directly in this
- * environment. Added by jcoder; you do not need to call it yourself.
- */
-final class JCoderErr {
-    private JCoderErr() {
-    }
-
-    static String messageOf(Throwable t) {
-        if (t == null) {
-            return null;
-        }
-        String text = t.toString();
-        int separator = text.indexOf(": ");
-        if (separator < 0) {
-            return null;
-        }
-        return text.substring(separator + 2);
-    }
-}
-`
 
 /**
  * Blanks out string literals, character literals and comments, replacing each
@@ -670,13 +601,6 @@ export interface CompilationPlan {
 export function planCompilation(
   sources: Array<{ path: string; text: string }>,
 ): CompilationPlan {
-  // A student who has written their own getMessage() — on a custom exception,
-  // say — has a method that genuinely works, so their calls must be left to
-  // resolve to it. One declaration anywhere turns the rewrite off everywhere,
-  // which is blunt but never wrong in the dangerous direction.
-  const declaresGetMessage = sources.some(source =>
-    DECLARES_GET_MESSAGE.test(blankLiteralsAndComments(source.text)))
-
   // `Path` is a name a student might genuinely want — a maze exercise, say — so
   // a collision has to lose gracefully rather than produce a duplicate-class
   // error against a file they cannot open.
@@ -691,18 +615,13 @@ export function planCompilation(
   // checks are simply left out rather than colliding with it.
   const withDivisionChecks = !MATH_HELPER_CLASSES.some(name => studentTypes.has(name))
 
-  let rewroteGetMessage = false
   let rewroteDivision = false
   const units: CompilationUnit[] = sources.map((source) => {
     const prepared = prepareSource(source.text, { shadowFileClasses: withFileSupport })
-    const named = declaresGetMessage ? prepared : rewriteGetMessage(prepared)
-    if (named !== prepared) rewroteGetMessage = true
-    // Blanked again rather than reused: the getMessage rewrite above has just
-    // changed the text, so an earlier mask would no longer line up with it.
     const text = withDivisionChecks
-      ? rewriteDivision(named, blankLiteralsAndComments(named))
-      : named
-    if (text !== named) rewroteDivision = true
+      ? rewriteDivision(prepared, blankLiteralsAndComments(prepared))
+      : prepared
+    if (text !== prepared) rewroteDivision = true
     return { path: toCompilerPath(source.path), text, injected: false }
   })
 
@@ -720,13 +639,6 @@ export function planCompilation(
 
   if (withFileSupport && !units.some(unit => unit.path === FILE_SUPPORT_PATH)) {
     units.unshift({ path: FILE_SUPPORT_PATH, text: FILE_SUPPORT_SOURCE, injected: true })
-  }
-
-  // Only carried when something actually calls it, so a program that never
-  // touches exceptions does not pay to compile it.
-  const definesOwnHelper = units.some(unit => unit.path === ERROR_HELPER_PATH)
-  if (rewroteGetMessage && !definesOwnHelper) {
-    units.unshift({ path: ERROR_HELPER_PATH, text: ERROR_HELPER_SOURCE, injected: true })
   }
 
   const definesOwnMath = units.some(unit => unit.path === MATH_HELPER_PATH)

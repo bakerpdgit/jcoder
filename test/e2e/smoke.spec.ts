@@ -254,21 +254,33 @@ test('reads and writes binary files byte for byte', async ({ page }) => {
   await expect(page.getByText('exited with code 0')).toBeVisible()
 })
 
-test('e.getMessage() works, despite the class library not offering it', async ({ page }) => {
+test('the @Renamed Throwable methods resolve and run', async ({ page }) => {
   await page.goto('/')
   test.skip(!(await runtimeIsPresent(page)), 'needs public/teavm — run `npm run fetch:runtime`')
 
   await waitForReady(page)
   await page.locator('.view-lines').click()
   await page.keyboard.press('ControlOrMeta+A')
+  // All four of these were unreachable from source while javac saw
+  // `getMessage0` and TeaVM linked `getMessage`; jcoder rewrote getMessage onto
+  // an injected helper and could only explain the rest. teavm-javac 199bed0c
+  // applies @Rename properly, so they link — which is what let the rewrite be
+  // deleted. If this test fails, that rewrite is what has to come back.
   await page.keyboard.type(
     'public class Main { public static void main(String[] a) { '
     + 'try { throw new java.io.IOException("bad file"); } '
-    + 'catch (java.io.IOException e) { System.out.println("caught: " + e.getMessage()); } } }')
+    + 'catch (java.io.IOException e) { '
+    + 'System.out.println("msg " + e.getMessage()); '
+    + 'System.out.println("local " + e.getLocalizedMessage()); '
+    + 'System.out.println("cause " + e.getCause()); '
+    + 'System.out.println("cls " + e.getClass().getName()); } } }')
 
   await page.getByTitle(/^Run/).click()
 
-  await expect(page.getByText('caught: bad file')).toBeVisible({ timeout: 120_000 })
+  await expect(page.getByText('msg bad file')).toBeVisible({ timeout: 120_000 })
+  await expect(page.getByText('local bad file')).toBeVisible()
+  await expect(page.getByText('cause null')).toBeVisible()
+  await expect(page.getByText('cls java.io.IOException')).toBeVisible()
   await expect(page.getByText('exited with code 0')).toBeVisible()
 })
 

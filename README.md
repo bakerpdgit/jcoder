@@ -328,13 +328,6 @@ worth knowing before setting an exercise.
 * **Files are emulated.** Text and binary both work — see
   [Reading and writing files](#reading-and-writing-files) — but they are the
   editor's files, not your computer's, and `RandomAccessFile` has no stand-in.
-* **`getMessage()` is rewritten for you.** TeaVM names the method `getMessage0`
-  and renames it while compiling, so javac offers a name TeaVM will not link and
-  TeaVM offers one javac cannot see — neither spelling works from source. jcoder
-  rewrites `e.getMessage()` onto an injected helper that recovers the message
-  from `toString()`, so ordinary `try`/`catch` code just works. `getClass()`,
-  `getCause()` and `getLocalizedMessage()` have the same problem and are only
-  explained, not fixed — use `e.toString()`.
 * **Exception stack traces have no frames.** The generated module is obfuscated,
   so the type and message are reported but not the line.
 * **No debugger yet** — breakpoints and stepping are the obvious next step.
