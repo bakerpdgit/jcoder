@@ -229,8 +229,8 @@ describe('explainRuntimeError', () => {
         // The stack is captured inside the constructor chain…
         { className: 'java.lang.Throwable', method: '<init>', file: 'TThrowable.java', line: 86 },
         { className: 'java.lang.RuntimeException', method: '<init>', file: 'TRuntimeException.java', line: 33 },
-        // …then jcoder's injected helper, then TeaVM's own entry plumbing.
-        { className: 'JCoderMath', method: 'div', file: 'JCoderMath.java', line: 11 },
+        // …then jcoder's injected Scanner, then TeaVM's own entry plumbing.
+        { className: 'Scanner', method: 'nextInt', file: 'Scanner.java', line: 240 },
         { className: 'Main', method: 'main', file: 'Main.java', line: 4 },
         { className: 'org.teavm.runtime.Fiber', method: 'start', file: 'Fiber.java', line: 347 },
       ],

@@ -165,31 +165,37 @@ Frames for the exception's own constructor chain, `org.teavm.*`, and jcoder's
 injected files are dropped — the student wrote none of them, and cannot open
 the last. Two e2e tests pin all of this against the real toolchain.
 
-### Division is rewritten so that dividing by zero can be caught
+### Division is the compiler's job again
 
-`utils/javaDivision.ts` turns `a / b` into `JCoderMath.div(a, b)`, and `x /= y`
-into `x /= JCoderMath.divisor(x, y)`, injecting a helper whose `int` and `long`
-overloads throw a real `ArithmeticException`. TeaVM declined to check division
-itself (konsoletyper/teavm#1249: too expensive without range analysis), and
-`strict` mode does not cover it, so this is the only case jcoder has to fix in
-the source rather than in the toolchain.
+`utils/javaDivision.ts` used to rewrite `a / b` onto an injected `JCoderMath`,
+because TeaVM lowered integer division straight onto the machine instruction
+and a divide by zero trapped rather than throwing. That was ~900 lines
+including its tests, and the backwards scan for the dividend was the most
+fragile code in the project — it was wrong twice, once dropping a cast so that
+worked example 7 printed 7.0 instead of 7.333, once swallowing a `return`.
 
-**Both operands are passed on purpose.** Overload resolution then promotes the
-pair exactly as the division would, so `total / count` on two ints reaches
-`div(int, int)` and throws, while `1.0 / 0` widens to `div(double, double)` and
-stays `Infinity`. Guarding only the divisor is half the code and gets that
-second case wrong — do not "simplify" it that way.
+TeaVM implemented checked division in e54eb98 (teavm#1249, which konsoletyper
+first declined and then did properly with range analysis), so the rewrite is
+gone. `smoke.spec.ts` compiles and runs a divide by zero against the real
+toolchain, which is what proves the bundle still has it.
 
-The backwards scan for the dividend is the fragile part, and it has already been
-wrong once: it swallowed the `return` of `return (double) total / n`, which
-compiled to nothing sensible, and before that dropped the cast, which silently
-turned worked example 7's average from 7.333 into 7.0. Neither showed up in the
-hand-written cases — `javaDivision.test.ts` now checks structurally that every
-operand it produces looks like an expression, over every worked example. Keep
-that test, and run an example in the browser after touching the scan.
+**If that test ever fails, the rewrite is what has to come back**, and the
+history of this file is where to find it. A bundle from `npm run fetch:runtime`
+will fail it, correctly: the published build predates all of this.
 
-`checkUnsupportedApis` therefore does **not** warn about catching
-`ArithmeticException`, unlike the other two.
+Two things are worse than they were under the rewrite, both deliberate:
+
+* **`getMessage()` is null.** TeaVM throws its `ArithmeticException` without a
+  message where the JDK says "/ by zero", so `catch (ArithmeticException e)`
+  prints `null`. `smoke.spec.ts` asserts that, so it is pinned rather than
+  assumed.
+* **A constant `Integer.MIN_VALUE / -1` kills the compiler.** `compiler.wasm`
+  is itself TeaVM-compiled Java, so folding that division traps *inside the
+  compiler* ("divide result unrepresentable") and generation ends with no
+  output and no diagnostic. The old rewrite hid this by rewriting the division
+  away. Now `checkUnsupportedApis` warns on the usual spelling and
+  `noOutputMessage` explains the rest. Reproduces only in the browser compiler:
+  under TeaVM's Gradle plugin the fold runs on a JVM and is correct.
 
 ### One exception cannot be caught — and the list used to be longer
 
@@ -203,7 +209,7 @@ same check over every worked example.
 `ClassCastException` **used** to behave that way and no longer do, because
 `public/teavm/` is now built from source with `strictMode` on (see below). The
 cast was the dangerous one: it produced `null` with no error at all.
-`ArithmeticException` is handled by the rewrite above.
+`ArithmeticException` is checked by TeaVM itself (see above).
 
 **This list is a property of the bundle, not of the source.** Do not add to it
 or remove from it on reasoning alone — `smoke.spec.ts` has a test that runs all

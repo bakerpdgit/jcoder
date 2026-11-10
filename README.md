@@ -284,47 +284,24 @@ worth knowing before setting an exercise.
   | `arr[99]` on a raw array | caught normally |
   | `null.something()` | caught normally |
   | a bad cast, `(Integer) aString` | caught normally |
-  | integer `/ 0` and `% 0` | caught normally — jcoder rewrites it |
+  | integer `/ 0` and `% 0` | caught normally |
   | **`new int[-1]`** | **stops the program** |
 
   Only the last one is left, and a program that tries to catch it gets a warning
   before it runs. It is also reported with the Java exception it corresponds to
   and a note that it cannot be caught.
 
-  The first three were machine traps until `public/teavm/` was rebuilt with
-  TeaVM's `strict` option on — the cast worst of all, because it produced `null`
-  with no error whatsoever. See
+  All four were machine traps until `public/teavm/` was rebuilt from source —
+  the first three because TeaVM's `strict` option was off, and division because
+  TeaVM did not check it at all. The cast was the worst of them, producing
+  `null` with no error whatsoever. jcoder rewrote division onto an injected
+  helper for a while; TeaVM's own checked division
+  ([#1249](https://github.com/konsoletyper/teavm/issues/1249)) replaced that.
+  See
   [Building the toolchain from source](#building-the-toolchain-from-source):
   the bundle the TeaVM project publishes still predates the option, so a jcoder
   running that one behaves the old way.
 
-  Division is jcoder's own doing rather than the toolchain's: `a / b` is
-  rewritten onto an injected helper that throws a real `ArithmeticException`, so
-  `catch` works and `Integer.MIN_VALUE / -1` gives the answer the JLS specifies.
-  See [Division is checked](#division-is-checked). TeaVM gained its own checked
-  division in [#1249](https://github.com/konsoletyper/teavm/issues/1249), which
-  is newer than the release this bundle was built against.
-
-* **Division is checked.** <a id="division-is-checked"></a>`a / b`, `a % b` and
-  `x /= y` are rewritten onto an injected `JCoderMath`, whose `int` and `long`
-  overloads throw `ArithmeticException` before dividing. Both operands are
-  passed, so Java's own overload resolution decides whether the division is an
-  integer one: `total / count` on two ints throws, while `1.0 / 0` stays
-  `Infinity` as the language requires.
-
-  The scan is conservative and leaves anything it cannot delimit alone —
-  division by a non-zero literal (which cannot throw, and needs to stay a
-  compile-time constant), a divisor beginning with a cast or `new`, and a
-  dividend ending in `++`. Those keep the old behaviour, and
-  `explainRuntimeError` still names them if they do fail. A rewritten line keeps
-  its line number but its columns shift, so a diagnostic on a line that divides
-  can point a few characters off.
-
-  TeaVM will not do this itself:
-  [TeaVM #1249](https://github.com/konsoletyper/teavm/issues/1249) was declined
-  because a check on every division costs more than a compiler should pay
-  without range analysis to elide it. That is the right call for a production
-  compiler and the wrong one for a playground, where programs run for seconds.
 * **Files are emulated.** Text and binary both work — see
   [Reading and writing files](#reading-and-writing-files) — but they are the
   editor's files, not your computer's, and `RandomAccessFile` has no stand-in.

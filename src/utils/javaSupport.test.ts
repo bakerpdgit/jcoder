@@ -6,7 +6,6 @@ import {
   prepareSource, scannerSource, toCompilerPath, toVfsPath,
 } from './javaSupport'
 import { FILE_SUPPORT_PATH, FILE_SUPPORT_SOURCE } from './javaFileSystem'
-import { MATH_HELPER_PATH } from './javaDivision'
 import { LANGUAGES } from './languages'
 
 /** The Scanner as it is injected in the normal case, with file support. */
@@ -318,42 +317,24 @@ describe('declaredTypeNames', () => {
   })
 })
 
-describe('the division checks', () => {
-  it('rewrites a division and carries the helper', () => {
-    const units = buildCompilationUnits([
-      { path: '/Main.java', text: 'class Main { int f(int a, int b) { return a / b; } }' },
-    ])
-    expect(units.find(u => u.path === 'Main.java')!.text).toContain('JCoderMath.div(')
-    expect(units.some(u => u.path === MATH_HELPER_PATH)).toBe(true)
-  })
-
-  it('carries the helper only when something needed it', () => {
-    const units = buildCompilationUnits([
-      { path: '/Main.java', text: 'class Main { int f() { return 6 / 2; } }' },
-    ])
-    // Division by a non-zero literal is left alone, so nothing needs checking.
-    expect(units.some(u => u.path === MATH_HELPER_PATH)).toBe(false)
-  })
-
-  it('stands aside for a student who declares their own JCoderMath', () => {
-    const units = buildCompilationUnits([
-      { path: '/Main.java', text: 'class Main { int f(int a, int b) { return a / b; } }' },
-      { path: '/JCoderMath.java', text: 'class JCoderMath { }' },
-    ])
-    expect(units.find(u => u.path === 'Main.java')!.text).toContain('a / b')
-    expect(units.filter(u => u.path === MATH_HELPER_PATH && u.injected)).toHaveLength(0)
-  })
-
-  it('rewrites a division sharing a line with a method call', () => {
-    // The division scan runs on `prepareSource` output and rebuilds its own
-    // mask from it, so anything else on the line has to survive untouched.
-    const units = buildCompilationUnits([{
-      path: '/Main.java',
-      text: 'class Main { void f(Exception e, int a, int b) { print(e.getMessage() + a / b); } }',
-    }])
+describe('division', () => {
+  it('is left exactly as the student wrote it', () => {
+    // It used to be rewritten onto an injected JCoderMath, because TeaVM
+    // lowered integer division straight onto the machine instruction and a
+    // divide by zero trapped instead of throwing. TeaVM gained its own checked
+    // division in e54eb98; smoke.spec.ts proves the bundle has it.
+    const text = 'class Main { int f(int a, int b) { return a / b; } }'
+    const units = buildCompilationUnits([{ path: '/Main.java', text }])
     const main = units.find(u => u.path === 'Main.java')!
-    expect(main.text).toContain('e.getMessage()')
-    expect(main.text).toContain('JCoderMath.div(')
+    expect(main.text).toContain('return a / b;')
+    expect(main.text).not.toContain('JCoderMath')
+    expect(units.some(u => u.injected && u.text.includes('JCoderMath'))).toBe(false)
+  })
+
+  it('leaves a compound assignment alone too', () => {
+    const text = 'class Main { void f(int a, int b) { a /= b; a %= b; } }'
+    const units = buildCompilationUnits([{ path: '/Main.java', text }])
+    expect(units.find(u => u.path === 'Main.java')!.text).toContain('a /= b; a %= b;')
   })
 })
 
