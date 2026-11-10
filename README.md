@@ -338,13 +338,18 @@ worth knowing before setting an exercise.
 
   The exception's own constructor frames, TeaVM's `Fiber` plumbing and jcoder's
   injected classes are hidden, because none of them are code the student wrote.
-  The gap is `ArrayIndexOutOfBoundsException`, which is raised by a bounds
-  check with no line mapping and so reports `at Main.main` without one.
+
+  `ArrayIndexOutOfBoundsException` used to be the exception that reported no
+  line, because an access the compiler could prove was out of range lost its
+  source location on the way to the throw. That was
+  [TeaVM #1346](https://github.com/konsoletyper/teavm/issues/1346), fixed in
+  `64c9e4bf` and included in the bundle here.
 
   This needs `public/teavm/deobfuscator.wasm`; without it every frame comes
   back as `java.lang.Throwable$FakeClass.fakeMethod(Throwable.java:10931)`,
-  where the number is a wasm byte offset. `npm run stage:runtime` warns if it
-  is missing.
+  where the number is a wasm byte offset. `npm run stage:runtime` fetches it
+  from Maven at the TeaVM version the compiler was built against — the two have
+  to match, since the debug-info format moves with the compiler.
 * **No debugger yet** — breakpoints and stepping are the obvious next step.
 * Chrome or Edge is recommended: **Connect a folder** needs the File System
   Access API, which Firefox and Safari do not implement.

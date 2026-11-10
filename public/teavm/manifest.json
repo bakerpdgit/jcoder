@@ -2,44 +2,45 @@
   "source": "built from source",
   "repository": "https://github.com/konsoletyper/teavm-javac",
   "teavmJavac": {
-    "commit": "76b5b53850f74e510ec8588a56a211cf60e9d496",
-    "committedAt": "2026-11-04T08:05:55+01:00",
-    "subject": "Fix the compile class library so javac can see inner classes and read annotations",
+    "commit": "a7305418e2bdb2a03598845d55bac924bee6e558",
+    "committedAt": "2026-11-08T20:20:42+01:00",
+    "subject": "Bump TeaVM version to 0.17.0-dev-4, remove unnecessary patches, add missing compilation options",
     "dirty": false
   },
-  "teavmVersion": "0.17.0-dev-3",
-  "deobfuscatorFrom": {
-    "commit": "80152835bdfe6aaef5b8774d2ca56b1b592284ad",
-    "committedAt": "2026-11-07T20:33:14+01:00",
-    "subject": "c: preserve precise types of values restored from fiber stack",
+  "teavmVersion": "0.17.0-SNAPSHOT",
+  "teavmCheckout": {
+    "commit": "677cf931fd1cef8c357b664cf8f62b485ffd119f",
+    "committedAt": "2026-11-10T20:17:42+01:00",
+    "subject": "wasm: implement ReferenceQueue.remove",
     "dirty": false
   },
-  "stagedAt": "2026-11-08T07:51:25.775Z",
+  "stagedAt": "2026-11-10T19:54:06.937Z",
   "files": [
     {
       "name": "compiler.wasm",
-      "bytes": 4751613,
-      "sha256": "9b5f9afc9bdf9608d43a408fabda165e11ad720fa33330b30364c460b0435852"
+      "bytes": 4859819,
+      "sha256": "d0e0c23fbf73ad2dba8b5370bea6acc23b39449066f97de457d55bc48cac715a"
     },
     {
       "name": "compiler.wasm-runtime.js",
-      "bytes": 17358,
-      "sha256": "f93b235747aa178cff6f28101b507d4956ea740c36a5987f642c1e457e8d6b8e"
+      "bytes": 17549,
+      "sha256": "82975b5e1ee8b97e563974b7906578892a12b1d6c9d7666b93e808884c7ecf91"
     },
     {
       "name": "compile-classlib-teavm.bin",
-      "bytes": 211512,
-      "sha256": "312126f367b372ed8b6ab2b9bfe3cca5856f4df7982b9a7b940de14c69d2747e"
+      "bytes": 211535,
+      "sha256": "1470ad39f1391ae7345e2a1e181752b6d7ae1b8fa03abd5a93a836c732ea42c2"
     },
     {
       "name": "runtime-classlib-teavm.bin",
-      "bytes": 2405003,
-      "sha256": "19840747de767e5916aed983e8c937a15bacab3f9eb0f908b5a4bb1b522f0490"
+      "bytes": 2407841,
+      "sha256": "bf9f87477968546a5f5bc35dcb2cf44dd52f30ca038c859802d305133e442aaa"
     },
     {
       "name": "deobfuscator.wasm",
       "bytes": 48583,
-      "sha256": "6462127c5e078700d08f06956545750b7db7f6055bb4a92bf4bf60925b413aa4"
+      "sha256": "c471d927a3d049f1b3717d467d3ca1fc960e962c32d8ba75d99ccbb5e3761bf1",
+      "from": "teavm checkout"
     }
   ]
 }
