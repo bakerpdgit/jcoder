@@ -18,7 +18,6 @@ import {
   type SourceProblem,
 } from '../utils/javaSupport'
 import { COMMAND_CHAR, FILE_SUPPORT_PATH } from '../utils/javaFileSystem'
-import { MATH_HELPER_PATH } from '../utils/javaDivision'
 import { describeError, type Toolchain } from './bootRuntime'
 import { FileBridge, type FileChange, type FileSnapshot } from './fileBridge'
 import type { TeaVMCompilerDiagnostic, TeaVMImports } from './teavmRuntime'
@@ -404,7 +403,7 @@ export function explainRuntimeError(error: unknown, thrown?: ThrownDetail | null
 }
 
 /** Files jcoder injects, which a student cannot open and did not write. */
-const INJECTED_FILES = new Set([SUPPORT_SOURCE_PATH, FILE_SUPPORT_PATH, MATH_HELPER_PATH])
+const INJECTED_FILES = new Set([SUPPORT_SOURCE_PATH, FILE_SUPPORT_PATH])
 
 /**
  * Turns raw frames into the `\tat …` lines Java prints.
@@ -471,6 +470,29 @@ export function captureThrows(
     })
     return supplier
   }
+}
+
+/**
+ * Explains a generation that reported success and then emitted nothing.
+ *
+ * There is one cause we know of, and it is worth naming because the bare
+ * message reads as a jcoder bug. `compiler.wasm` is itself TeaVM-compiled
+ * Java, so when its optimiser constant-folds `Integer.MIN_VALUE / -1` the
+ * division traps inside the compiler — "divide result unrepresentable" — and
+ * generation stops without a diagnostic. The same program compiles fine under
+ * TeaVM's Gradle plugin, where the fold runs on a JVM and gives the answer the
+ * JLS asks for.
+ *
+ * The pre-flight check in `checkUnsupportedApis` catches the usual spellings
+ * first; this is for the ones it cannot see, such as a constant reached
+ * through a field.
+ */
+function noOutputMessage(produced: string): string {
+  return `The compiler produced no output. It emitted: ${produced}\n\n`
+    + 'One known cause is dividing Integer.MIN_VALUE (or Long.MIN_VALUE) by -1 '
+    + 'where the compiler can work the division out in advance: that overflows, '
+    + 'and it stops the compiler rather than your program. Compute the divisor '
+    + 'at run time — read it, or pass it to a method — and it will compile.'
 }
 
 /**
@@ -586,9 +608,7 @@ export async function compileAndRun(
   const wasm = compiler.getWebAssemblyOutputFile('app.wasm')
   if (!wasm) {
     const produced = compiler.listWebAssemblyOutputFiles().join(', ') || '(none)'
-    publish([syntheticError(
-      `The compiler reported success but produced no app.wasm. It emitted: ${produced}`,
-    )])
+    publish([syntheticError(noOutputMessage(produced))])
     finish(1)
     return
   }

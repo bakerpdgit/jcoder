@@ -291,18 +291,18 @@ test('dividing by zero throws an exception the program can catch', async ({ page
   await waitForReady(page)
   await page.locator('.view-lines').click()
   await page.keyboard.press('ControlOrMeta+A')
-  // Every case the rewrite has to get right at once: an integer division that
-  // must throw, a floating-point one that must not, a cast that must survive
-  // (dropping it makes the answer 3.0), the overflowing division the machine
-  // also refuses, and a compound assignment.
+  // This is what licenses the deletion of jcoder's old JCoderMath rewrite: an
+  // integer division that must throw, a floating-point one that must not, a
+  // cast that must survive (dropping it makes the answer 3.0), and a compound
+  // assignment — all handled by TeaVM's own checked division since e54eb98.
+  // If this fails, that rewrite is what has to come back.
   await page.keyboard.type(
     'public class Main { public static void main(String[] a) { '
-    + 'int n = 0; int m = -1; '
+    + 'int n = 0; '
     + 'try { System.out.println(10 / n); } '
     + 'catch (ArithmeticException e) { System.out.println("caught: " + e.getMessage()); } '
     + 'System.out.println("infinity " + (1.0 / n)); '
     + 'System.out.println("avg " + ((double) 7 / 2)); '
-    + 'System.out.println("minint " + (Integer.MIN_VALUE / m)); '
     // Printed with a computed part, so the console text is not also visible in
     // the editor above it, where a bare literal would match twice.
     + 'int x = 5; try { x /= n; } '
@@ -311,13 +311,35 @@ test('dividing by zero throws an exception the program can catch', async ({ page
 
   await page.getByTitle(/^Run/).click()
 
-  await expect(page.getByText('caught: / by zero')).toBeVisible({ timeout: 120_000 })
+  // TeaVM's ArithmeticException carries no message, where the JDK says
+  // "/ by zero" — so this prints null. Accurate, if less helpful than Java.
+  await expect(page.getByText('caught: null')).toBeVisible({ timeout: 120_000 })
   await expect(page.getByText('infinity Infinity')).toBeVisible()
   await expect(page.getByText('avg 3.5')).toBeVisible()
-  await expect(page.getByText('minint -2147483648')).toBeVisible()
-  await expect(page.getByText("compound / by zero")).toBeVisible()
+  await expect(page.getByText('compound null')).toBeVisible()
   await expect(page.getByText("finished with 5")).toBeVisible()
   await expect(page.getByText('exited with code 0')).toBeVisible()
+})
+
+test('a constant MIN_VALUE / -1 is explained rather than silently empty', async ({ page }) => {
+  await page.goto('/')
+  test.skip(!(await runtimeIsPresent(page)), 'needs public/teavm — run `npm run fetch:runtime`')
+
+  await waitForReady(page)
+  await page.locator('.view-lines').click()
+  await page.keyboard.press('ControlOrMeta+A')
+  // compiler.wasm is itself TeaVM-compiled Java: folding this division traps
+  // inside the compiler, which then emits nothing at all. Neither jcoder nor
+  // the student can prevent that, so the least we do is say what happened.
+  await page.keyboard.type(
+    'public class Main { public static void main(String[] a) { '
+    + 'int m = -1; System.out.println(Integer.MIN_VALUE / m); } }')
+
+  await page.getByTitle(/^Run/).click()
+
+  await expect(page.getByRole('button', { name: /^Problems/ })).toContainText('1', { timeout: 120_000 })
+  await page.getByRole('button', { name: /^Problems/ }).click()
+  await expect(page.getByText(/Dividing MIN_VALUE by -1 can stop the compiler/)).toBeVisible()
 })
 
 test('strict mode makes array, null and cast errors catchable', async ({ page }) => {

@@ -11,18 +11,18 @@
  * since then (strict mode, `@Rename`, the annotation handling javac needs) is
  * only reachable this way. See README, "Building the toolchain from source".
  *
- *   node scripts/stage-runtime.mjs ../teavm-javac [../teavm]
+ *   node scripts/stage-runtime.mjs ../teavm-javac
  *   JCODER_TEAVM_BUILD=../teavm-javac node scripts/stage-runtime.mjs
  *
- * The optional second path is a konsoletyper/teavm checkout, used only for the
- * stack deobfuscator. Leave it out and whatever is already in `public/teavm/`
- * is kept.
+ * The stack deobfuscator is fetched from Maven at whatever TeaVM version the
+ * checkout pins, so no second checkout is needed.
  *
  * The manifest records the teavm-javac commit and the TeaVM version it pinned,
  * because `public/teavm/` is committed: without that, a deployment is four
  * opaque binaries nobody can place.
  */
 import { createHash } from 'node:crypto'
+import { inflateRawSync } from 'node:zlib'
 import { execFileSync } from 'node:child_process'
 import { copyFile, mkdir, readFile, writeFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
@@ -41,20 +41,23 @@ const FILES = [
 ]
 
 /**
- * The stack deobfuscator, which lives in the TeaVM repository rather than
- * teavm-javac — hence the optional second argument.
+ * The stack deobfuscator, taken from Maven at the version the checkout pins.
  *
  * Without it every frame of a student's stack trace comes back as
  * `java.lang.Throwable$FakeClass.fakeMethod(Throwable.java:10931)`, the number
  * being a wasm byte offset. It reads the debug info teavm-javac embeds in each
  * generated module, so it is what turns those into real class, method and line
  * names. It is a generic parser, not tied to one program.
+ *
+ * Matching the version matters: it reads a debug-info format that moves with
+ * the compiler. Built from a TeaVM master checkout beside a released compiler
+ * the two differ — measurably, the bytes are not the same.
  */
-const DEOBFUSCATOR = {
-  name: 'deobfuscator.wasm',
-  from: 'tools/deobfuscator-wasm-gc/build/teavm/org/teavm/backend/wasm',
-  minBytes: 10_000,
-}
+const DEOBFUSCATOR = { name: 'deobfuscator.wasm', minBytes: 10_000 }
+const DEOBFUSCATOR_JAR = (version) => 'https://teavm.org/maven/repository/org/teavm'
+  + `/teavm-wasm-gc-deobfuscator/${version}/teavm-wasm-gc-deobfuscator-${version}.jar`
+/** Where the wasm sits inside that jar. */
+const DEOBFUSCATOR_ENTRY = 'org/teavm/backend/wasm/deobfuscator.wasm'
 
 function human(bytes) {
   return bytes >= 1_000_000
@@ -117,6 +120,82 @@ async function stage(checkout, file) {
   return { name: file.name, bytes: bytes.length, sha256 }
 }
 
+/** Set when the deobfuscator came from a checkout rather than Maven. */
+let teavmCheckout = null
+
+/** Downloads the deobfuscator matching `version` into `public/teavm/`. */
+async function stageDeobfuscator(version) {
+  if (!version) {
+    throw new Error('Could not read the TeaVM version from gradle/libs.versions.toml, '
+      + 'so there is no way to tell which deobfuscator matches this build.')
+  }
+  // teavm-javac master tracks TeaVM master, and a SNAPSHOT is not on Maven —
+  // so that case needs a teavm checkout, whose deobfuscator the build produces.
+  if (version.endsWith('-SNAPSHOT')) {
+    const given = process.argv[3] ?? process.env.JCODER_TEAVM_REPO
+    if (!given) {
+      throw new Error(`The checkout pins TeaVM ${version}, which is not on Maven. `
+        + 'Pass a konsoletyper/teavm checkout as the second argument; its '
+        + 'tools/deobfuscator-wasm-gc build output is used instead.')
+    }
+    const teavm = isAbsolute(given) ? given : resolve(process.cwd(), given)
+    const staged = await stage(teavm, {
+      ...DEOBFUSCATOR,
+      from: 'tools/deobfuscator-wasm-gc/build/teavm/org/teavm/backend/wasm',
+    })
+    // A SNAPSHOT version string names nothing, so the commit is what makes the
+    // bundle traceable. Recorded for the whole build, not just this file.
+    teavmCheckout = describeCheckout(teavm)
+    return { ...staged, from: 'teavm checkout' }
+  }
+  const url = DEOBFUSCATOR_JAR(version)
+  const response = await fetch(url)
+  if (!response.ok) {
+    throw new Error(`${response.status} ${response.statusText} fetching ${url}`)
+  }
+  const bytes = extractFromJar(Buffer.from(await response.arrayBuffer()), DEOBFUSCATOR_ENTRY)
+  if (bytes.length < DEOBFUSCATOR.minBytes) {
+    throw new Error(`${DEOBFUSCATOR_ENTRY} is only ${bytes.length} bytes.`)
+  }
+  if (bytes.subarray(0, 4).toString('binary') !== String.fromCharCode(0) + 'asm') {
+    throw new Error(`${DEOBFUSCATOR_ENTRY} is not a WebAssembly module.`)
+  }
+  await writeFile(join(OUT_DIR, DEOBFUSCATOR.name), bytes)
+  const sha256 = createHash('sha256').update(bytes).digest('hex')
+  console.log(`  ${DEOBFUSCATOR.name.padEnd(28)} ${human(bytes.length).padStart(8)}`
+    + `  sha256:${sha256.slice(0, 12)}  (maven ${version})`)
+  return { name: DEOBFUSCATOR.name, bytes: bytes.length, sha256, from: url }
+}
+
+/**
+ * Pulls one entry out of a jar by walking its central directory.
+ *
+ * A jar is a zip; this is one file, so it is cheaper than taking on a zip
+ * dependency for it.
+ */
+function extractFromJar(jar, entryName) {
+  const end = jar.lastIndexOf(Buffer.from([0x50, 0x4b, 0x05, 0x06]))
+  if (end < 0) throw new Error('Not a jar: no end-of-central-directory record.')
+  let offset = jar.readUInt32LE(end + 16)
+  const count = jar.readUInt16LE(end + 10)
+  for (let i = 0; i < count; i++) {
+    const nameLength = jar.readUInt16LE(offset + 28)
+    const extraLength = jar.readUInt16LE(offset + 30)
+    const commentLength = jar.readUInt16LE(offset + 32)
+    const name = jar.subarray(offset + 46, offset + 46 + nameLength).toString('utf8')
+    if (name === entryName) {
+      const localOffset = jar.readUInt32LE(offset + 42)
+      const method = jar.readUInt16LE(localOffset + 8)
+      const start = localOffset + 30 + jar.readUInt16LE(localOffset + 26)
+        + jar.readUInt16LE(localOffset + 28)
+      const raw = jar.subarray(start, start + jar.readUInt32LE(offset + 20))
+      return method === 0 ? Buffer.from(raw) : inflateRawSync(raw)
+    }
+    offset += 46 + nameLength + extraLength + commentLength
+  }
+  throw new Error(`${entryName} is not in the jar.`)
+}
+
 async function main() {
   const given = process.argv[2] ?? process.env.JCODER_TEAVM_BUILD
   if (!given) {
@@ -133,23 +212,9 @@ async function main() {
   const files = []
   for (const file of FILES) files.push(await stage(checkout, file))
 
-  const givenTeavm = process.argv[3] ?? process.env.JCODER_TEAVM_REPO
-  let deobfuscator = null
-  if (givenTeavm) {
-    const teavmCheckout = isAbsolute(givenTeavm) ? givenTeavm : resolve(process.cwd(), givenTeavm)
-    files.push(await stage(teavmCheckout, DEOBFUSCATOR))
-    deobfuscator = describeCheckout(teavmCheckout)
-  } else if (existsSync(join(OUT_DIR, DEOBFUSCATOR.name))) {
-    console.log(`  ${DEOBFUSCATOR.name.padEnd(28)} ${'kept'.padStart(8)}  (no teavm checkout given)`)
-  } else {
-    console.log(`
-Warning: no ${DEOBFUSCATOR.name}. Stack traces will show`)
-    console.log('java.lang.Throwable$FakeClass.fakeMethod rather than real frames.')
-    console.log('Pass a konsoletyper/teavm checkout as the second argument to fix that.')
-  }
-
   const source = describeCheckout(checkout)
   const teavm = await teavmVersion(checkout)
+  files.push(await stageDeobfuscator(teavm))
   await writeFile(
     join(OUT_DIR, 'manifest.json'),
     JSON.stringify({
@@ -157,12 +222,17 @@ Warning: no ${DEOBFUSCATOR.name}. Stack traces will show`)
       repository: 'https://github.com/konsoletyper/teavm-javac',
       teavmJavac: source,
       teavmVersion: teavm,
-      deobfuscatorFrom: deobfuscator,
+      teavmCheckout,
       stagedAt: new Date().toISOString(),
       files,
     }, null, 2) + '\n',
   )
 
+  if (teavm?.endsWith('-SNAPSHOT')) {
+    console.log('')
+    console.log(`Note: built against TeaVM ${teavm}, an unreleased snapshot.`)
+    console.log('manifest.json records the commit it came from; see README.')
+  }
   if (source?.dirty) {
     console.log('\nNote: the checkout had uncommitted changes, so this build is not reproducible.')
   }

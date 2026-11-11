@@ -56,9 +56,6 @@
 import {
   FILE_SUPPORT_PATH, FILE_SUPPORT_SOURCE, SHADOWED_IMPORTS,
 } from './javaFileSystem'
-import {
-  MATH_HELPER_CLASSES, MATH_HELPER_PATH, MATH_HELPER_SOURCE, rewriteDivision,
-} from './javaDivision'
 
 export { FILE_SUPPORT_PATH } from './javaFileSystem'
 
@@ -498,6 +495,25 @@ const UNSUPPORTED_APIS: Array<{
       'dividing by zero, and anything you throw yourself.',
   },
   {
+    // `compiler.wasm` is itself TeaVM-compiled Java, so when its optimiser
+    // constant-folds MIN_VALUE / -1 the division traps *inside the compiler*
+    // and generation stops with no diagnostic at all. Catching the usual
+    // spelling here turns a baffling "produced no output" into something a
+    // student can act on; `noOutputMessage` covers the rest.
+    // Only the MIN_VALUE spelling: an earlier version also matched any
+    // `/ -1`, which is a perfectly ordinary thing to write and cannot trip
+    // this on its own — the dividend has to be MIN_VALUE. A warning on every
+    // `x / -1` is the kind of noise that teaches students to ignore the tab.
+    pattern: /\b(?:Integer|Long)\s*\.\s*MIN_VALUE\s*\//,
+    severity: 'warning',
+    message:
+      'Dividing MIN_VALUE by -1 can stop the compiler.\n\n' +
+      'Integer.MIN_VALUE / -1 overflows, and when the compiler can work the ' +
+      'division out in advance that overflow stops the compiler rather than ' +
+      'your program — no output and no error. Work the divisor out at run time, ' +
+      'by reading it or passing it to a method, and it compiles and runs.',
+  },
+  {
     pattern: /\bSystem\s*\.\s*in\b/,
     // `new Scanner(System.in)` is the form this whole app is built around: the
     // built-in Scanner ignores the stream it is handed. Warning about the one
@@ -611,19 +627,11 @@ export function planCompilation(
   const fileSupportBlockedBy = FILE_SUPPORT_CLASSES.filter(name => studentTypes.has(name))
   const withFileSupport = fileSupportBlockedBy.length === 0
 
-  // As with `Path` above, a student's own JCoderMath wins and the division
-  // checks are simply left out rather than colliding with it.
-  const withDivisionChecks = !MATH_HELPER_CLASSES.some(name => studentTypes.has(name))
-
-  let rewroteDivision = false
-  const units: CompilationUnit[] = sources.map((source) => {
-    const prepared = prepareSource(source.text, { shadowFileClasses: withFileSupport })
-    const text = withDivisionChecks
-      ? rewriteDivision(prepared, blankLiteralsAndComments(prepared))
-      : prepared
-    if (text !== prepared) rewroteDivision = true
-    return { path: toCompilerPath(source.path), text, injected: false }
-  })
+  const units: CompilationUnit[] = sources.map(source => ({
+    path: toCompilerPath(source.path),
+    text: prepareSource(source.text, { shadowFileClasses: withFileSupport }),
+    injected: false,
+  }))
 
   // Someone learning about classes may well write their own Scanner. Theirs
   // must win, or they would get a baffling "duplicate class" error from a file
@@ -639,11 +647,6 @@ export function planCompilation(
 
   if (withFileSupport && !units.some(unit => unit.path === FILE_SUPPORT_PATH)) {
     units.unshift({ path: FILE_SUPPORT_PATH, text: FILE_SUPPORT_SOURCE, injected: true })
-  }
-
-  const definesOwnMath = units.some(unit => unit.path === MATH_HELPER_PATH)
-  if (rewroteDivision && !definesOwnMath) {
-    units.unshift({ path: MATH_HELPER_PATH, text: MATH_HELPER_SOURCE, injected: true })
   }
   return { units, fileSupportBlockedBy }
 }
