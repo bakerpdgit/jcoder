@@ -500,7 +500,11 @@ const UNSUPPORTED_APIS: Array<{
     // and generation stops with no diagnostic at all. Catching the usual
     // spelling here turns a baffling "produced no output" into something a
     // student can act on; `noOutputMessage` covers the rest.
-    pattern: /\b(?:Integer|Long)\s*\.\s*MIN_VALUE\s*\/|\/\s*-\s*1\b/,
+    // Only the MIN_VALUE spelling: an earlier version also matched any
+    // `/ -1`, which is a perfectly ordinary thing to write and cannot trip
+    // this on its own — the dividend has to be MIN_VALUE. A warning on every
+    // `x / -1` is the kind of noise that teaches students to ignore the tab.
+    pattern: /\b(?:Integer|Long)\s*\.\s*MIN_VALUE\s*\//,
     severity: 'warning',
     message:
       'Dividing MIN_VALUE by -1 can stop the compiler.\n\n' +

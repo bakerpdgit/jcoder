@@ -197,6 +197,13 @@ Two things are worse than they were under the rewrite, both deliberate:
   `noOutputMessage` explains the rest. Reproduces only in the browser compiler:
   under TeaVM's Gradle plugin the fold runs on a JVM and is correct.
 
+  teavm#1355 was closed with a workaround — build the bootstrap compiler with
+  strict mode on — and it does not work: adding `strict = true` to
+  teavm-javac's `wasmGC` block makes TeaVM's own optimiser throw an NPE
+  generating `com.sun.tools.javac.comp.Modules.computeTransitiveClosure`
+  (`WasmInstructionsOptimizer.java:1202`). Tried and reverted; do not try it
+  again without checking that upstream first.
+
 ### One exception cannot be caught — and the list used to be longer
 
 `new int[-1]` is raised by the WasmGC backend as a machine trap, not a Java
